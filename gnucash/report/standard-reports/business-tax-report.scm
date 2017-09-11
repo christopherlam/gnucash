@@ -633,7 +633,6 @@ accounts must be of type ASSET for taxes paid on expenses, and type LIABILITY fo
   (define (gnc:register-trep-option new-option)
     (gnc:register-option gnc:*transaction-report-options* new-option))
   
-
   ;; General options
   
   (gnc:options-add-date-interval!
