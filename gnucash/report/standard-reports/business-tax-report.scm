@@ -51,6 +51,8 @@
 (define optname-prime-sortkey (N_ "Primary Key"))
 (define optname-prime-subtotal (N_ "Primary Subtotal"))
 (define optname-prime-date-subtotal (N_ "Primary Subtotal for Date Key"))
+(define optname-full-account-name (N_ "Show Full Account Name"))
+(define optname-show-account-code (N_ "Show Account Code"))
 (define optname-sec-sortkey (N_ "Secondary Key"))
 (define optname-sec-subtotal (N_ "Secondary Subtotal"))
 (define optname-sec-date-subtotal (N_ "Secondary Subtotal for Date Key"))
@@ -628,6 +630,8 @@ accounts must be of type ASSET for taxes paid on expenses, and type LIABILITY fo
   (define gnc:*transaction-report-options* (gnc:new-options))
   (define (gnc:register-trep-option new-option)
     (gnc:register-option gnc:*transaction-report-options* new-option))
+  (define prime-sortkey-subtotal-enabled #t)
+  (define sec-sortkey-subtotal-enabled #f)
   
   ;; General options
   
@@ -888,23 +892,34 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
       'account-name
       key-choice-list #f
       (lambda (x)
-        (gnc-option-db-set-option-selectable-by-name
-         options pagename-sorting optname-prime-subtotal
-         (and (member x subtotal-enabled) #t))
+        (set! prime-sortkey-subtotal-enabled (member x subtotal-enabled))
+
         (gnc-option-db-set-option-selectable-by-name
          options pagename-sorting optname-prime-date-subtotal
-         (if (member x date-sorting-types) #t #f)))))
+         (if (member x date-sorting-types) #t #f))
+        
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-prime-subtotal
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled))
+        
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-full-account-name
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled))
+         
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-show-account-code
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled)))))
     
     (gnc:register-trep-option
      (gnc:make-simple-boolean-option
-      pagename-sorting (N_ "Show Full Account Name")
+      pagename-sorting optname-full-account-name
       "a1" 
       (N_ "Show the full account name for subtotals and subtitles?")
       #f))
     
     (gnc:register-trep-option
      (gnc:make-simple-boolean-option
-      pagename-sorting (N_ "Show Account Code")
+      pagename-sorting optname-show-account-code
       "a2" 
       (N_ "Show the account code for subtotals and subtitles?")
       #f))
@@ -939,12 +954,23 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
       'date
       key-choice-list #f
       (lambda (x)
-        (gnc-option-db-set-option-selectable-by-name
-         options pagename-sorting optname-sec-subtotal
-         (and (member x subtotal-enabled) #t))
+        (set! sec-sortkey-subtotal-enabled (member x subtotal-enabled))
+        
         (gnc-option-db-set-option-selectable-by-name
          options pagename-sorting optname-sec-date-subtotal
-         (if (member x date-sorting-types) #t #f)))))
+         (if (member x date-sorting-types) #t #f))
+        
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-prime-subtotal
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled))
+        
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-full-account-name
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled))
+         
+        (gnc-option-db-set-option-selectable-by-name
+         options pagename-sorting optname-show-account-code
+         (or prime-sortkey-subtotal-enabled sec-sortkey-subtotal-enabled)))))
     
     (gnc:register-trep-option
      (gnc:make-simple-boolean-option
