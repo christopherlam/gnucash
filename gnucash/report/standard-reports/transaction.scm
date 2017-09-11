@@ -975,9 +975,7 @@ disable the substring filter. This filter is case-sensitive.")
       pagename-sorting optname-sec-sortorder
       "i" (N_ "Order of Secondary sorting.")
       'ascend
-      ascending-choice-list))
-
-    (apply-selectable-by-name-options))
+      ascending-choice-list)))
   
   ;; Display options
   
@@ -1000,7 +998,7 @@ disable the substring filter. This filter is case-sensitive.")
     (list (N_ "Use Full Account Name")        "f"  (N_ "Display the full account name?") #t)
     (list (N_ "Account Code")                 "g"  (N_ "Display the account code?") #f)
     ;; other account name option appears here
-    (list (N_ "Use Full Other Account Name")  "i"  (N_ "Display the full account name?") #t)
+    (list (N_ "Use Full Other Account Name")  "i"  (N_ "Display the full account name?") #f)
     (list (N_ "Other Account Code")           "j"  (N_ "Display the other account code?") #f)
     (list (N_ "Shares")                       "k"  (N_ "Display the number of shares?") #f)
     (list (N_ "Price")                        "l"  (N_ "Display the shares price?") #f)
