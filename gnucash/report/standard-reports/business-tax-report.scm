@@ -960,7 +960,8 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
     (gnc:register-trep-option
      (gnc:make-complex-boolean-option
       pagename-sorting optname-prime-subtotal
-      "e5" (N_ "Subtotal according to the primary key?")
+      "e5"
+      (N_ "Subtotal according to the primary key?")
       prime-sortkey-subtotal-true #f
       (lambda (x)
         (set! prime-sortkey-subtotal-true x)
