@@ -1043,7 +1043,7 @@ disable the substring filter. This filter is case-sensitive.")
   (gnc:register-trep-option
    (gnc:make-complex-boolean-option
     gnc:pagename-display (N_ "Other Account Name")
-    "h"  (N_ "Display the other account name? (if this is a split transaction, this parameter is guessed).") #f
+    "h5"  (N_ "Display the other account name? (if this is a split transaction, this parameter is guessed).") #f
     #f
     (lambda (x) (gnc-option-db-set-option-selectable-by-name
                  gnc:*transaction-report-options*
