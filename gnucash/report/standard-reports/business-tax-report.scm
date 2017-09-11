@@ -894,8 +894,8 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
       (let* ((prime-sortkey-enabled (not (eq? prime-sortkey 'none)))
              (prime-sortkey-subtotal-enabled (member prime-sortkey subtotal-enabled))
              (prime-date-sortingtype-enabled (member prime-sortkey date-sorting-types))
-             (sec-sortkey-subtotal-enabled (member sec-sortkey subtotal-enabled))
              (sec-sortkey-enabled (not (eq? sec-sortkey 'none)))
+             (sec-sortkey-subtotal-enabled (member sec-sortkey subtotal-enabled))
              (sec-date-sortingtype-enabled (member sec-sortkey date-sorting-types)))
         
         (gnc-option-db-set-option-selectable-by-name
@@ -985,7 +985,8 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
     (gnc:register-trep-option
      (gnc:make-multichoice-callback-option
       pagename-sorting optname-sec-sortkey
-      "f" (N_ "Sort by this criterion second.")
+      "f"
+      (N_ "Sort by this criterion second.")
       sec-sortkey
       key-choice-list #f
       (lambda (x)
@@ -995,7 +996,8 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
     (gnc:register-trep-option
      (gnc:make-complex-boolean-option
       pagename-sorting optname-sec-subtotal
-      "i5" (N_ "Subtotal according to the secondary key?")
+      "i5"
+      (N_ "Subtotal according to the secondary key?")
       sec-sortkey-subtotal-true #f
       (lambda (x)
         (set! sec-sortkey-subtotal-true x)
