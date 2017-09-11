@@ -886,7 +886,7 @@ for taxes paid on expenses, and type LIABILITY for taxes collected on sales.")
 
         (prime-sortkey 'account-name)
         (prime-sortkey-subtotal-true #t)
-        (sec-sortkey 'none)
+        (sec-sortkey 'register-order)
         (sec-sortkey-subtotal-true #f))
     
     (define (apply-selectable-by-name-options)
