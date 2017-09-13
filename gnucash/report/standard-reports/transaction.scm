@@ -645,7 +645,7 @@
     "h" (N_ "Select type of filtering to apply to transactions. ")
     #f
     (list (vector #f
-                  (N_ "Select all transactions")
+                  (N_ "Select all transactions.")
                   (N_ "Select all transactions. Will contain regular transactions, \
 invoices/bills, payments and link transactions between invoices & payments."))
           (vector (list TXN-TYPE-NONE TXN-TYPE-INVOICE)
