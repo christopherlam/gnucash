@@ -639,6 +639,31 @@
     gnc:pagename-general optname-table-export
     "g" (N_ "Formats the table suitable for cut & paste exporting with extra cells.") #f))  
   
+  (gnc:register-trep-option
+   (gnc:make-multichoice-option
+    gnc:pagename-general (N_ "Transaction Type Filter")
+    "h" (N_ "Select type of filtering to apply to transactions. ")
+    #f
+    (list (vector #f
+                  (N_ "Select all transactions")
+                  (N_ "Select all transactions. Will contain regular transactions, \
+invoices/bills, payments and link transactions between invoices & payments."))
+          (vector (list TXN-TYPE-NONE TXN-TYPE-INVOICE)
+                  (N_ "Select regular transactions and invoices/bills only.")
+                  (N_ "Select regular transactions and invoices/bills only."))
+          (vector (list TXN-TYPE-NONE)
+                  (N_ "Select regular transactions only.")
+                  (N_ "Select regular transactions only."))
+          (vector (list TXN-TYPE-INVOICE)
+                  (N_ "Select invoices/bills only.")
+                  (N_ "Select invoices/bills only."))
+          (vector (list TXN-TYPE-PAYMENT)
+                  (N_ "Select payments only.")
+                  (N_ "Select payments only."))
+          (vector (list TXN-TYPE-LINK)
+                  (N_ "Select link transactions only.")
+                  (N_ "Select link transactions only.")))))
+  
   ;; Accounts options
   
   ;; account to do report on
@@ -1521,6 +1546,7 @@ Credit Card, and Income accounts.")))))
 	(c_account_substring (opt-val gnc:pagename-accounts "Account Substring"))
 	(c_account_2 (opt-val gnc:pagename-accounts "Filter By..."))
 	(filter-mode (opt-val gnc:pagename-accounts "Filter Type"))
+	(transaction-type-filter (opt-val gnc:pagename-general "Transaction Type Filter"))
         (begindate (gnc:timepair-start-day-time
                     (gnc:date-option-absolute-time
                      (opt-val gnc:pagename-general "Start Date"))))
@@ -1598,6 +1624,14 @@ Credit Card, and Income accounts.")))))
 		)
 	      )
 	
+          (if transaction-type-filter
+              (set! splits (filter
+                            (lambda (split)
+                              (let* ((trans (xaccSplitGetParent split))
+                                     (txn-type (xaccTransGetTxnType trans)))
+                                (member txn-type transaction-type-filter)))
+                            splits)))
+
           (if (not (null? splits))
               (let ((table 
                      (make-split-table 
