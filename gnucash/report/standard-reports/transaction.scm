@@ -870,10 +870,6 @@ disable the substring filter. This filter is case-sensitive.")
           (vector 'quarterly (N_ "Quarterly") (N_ "Quarterly."))
           (vector 'yearly (N_ "Yearly") (N_ "Yearly."))))
         
-        (disp-memo? #t)
-        (disp-accname? #t)
-        (disp-other-accname? #f)
-        (is-single? #t)
         (prime-sortkey 'account-name)
         (prime-sortkey-subtotal-true #t)
         (sec-sortkey 'register-order)
@@ -887,26 +883,6 @@ disable the substring filter. This filter is case-sensitive.")
              (sec-sortkey-subtotal-enabled (member sec-sortkey subtotal-enabled))
              (sec-date-sortingtype-enabled (member sec-sortkey date-sorting-types)))
         
-        (gnc-option-db-set-option-selectable-by-name
-         options gnc:pagename-display (N_ "Use Full Account Name")
-         disp-accname?)
-        
-        (gnc-option-db-set-option-selectable-by-name
-         options gnc:pagename-display (N_ "Other Account Name") 
-         is-single?)
-                 
-        (gnc-option-db-set-option-selectable-by-name
-         options gnc:pagename-display (N_ "Use Full Other Account Name") 
-         (and disp-accname? is-single?))
-                
-        (gnc-option-db-set-option-selectable-by-name
-         options gnc:pagename-display (N_ "Other Account Code") 
-         is-single?)
-
-        (gnc-option-db-set-option-selectable-by-name
-         options gnc:pagename-display (N_ "Notes")
-         disp-memo?)
-                 
         (gnc-option-db-set-option-selectable-by-name
          options pagename-sorting optname-prime-subtotal
          prime-sortkey-subtotal-enabled)
@@ -1028,6 +1004,33 @@ disable the substring filter. This filter is case-sensitive.")
   
   ;; Display options
   
+    (let ((options gnc:*transaction-report-options*)
+          (disp-memo? #t)
+          (disp-accname? #t)
+          (disp-other-accname? #f)
+          (is-single? #t))
+          
+      (define (apply-selectable-by-name-display-options)
+        (gnc-option-db-set-option-selectable-by-name
+         options gnc:pagename-display (N_ "Use Full Account Name")
+         disp-accname?)
+        
+        (gnc-option-db-set-option-selectable-by-name
+         options gnc:pagename-display (N_ "Other Account Name") 
+         is-single?)
+                 
+        (gnc-option-db-set-option-selectable-by-name
+         options gnc:pagename-display (N_ "Use Full Other Account Name") 
+         (and disp-other-accname? is-single?))
+                
+        (gnc-option-db-set-option-selectable-by-name
+         options gnc:pagename-display (N_ "Other Account Code") 
+         is-single?)
+
+        (gnc-option-db-set-option-selectable-by-name
+         options gnc:pagename-display (N_ "Notes")
+         disp-memo?))      
+      
   (for-each
    (lambda (l)
      (gnc:register-trep-option
@@ -1066,33 +1069,31 @@ disable the substring filter. This filter is case-sensitive.")
   (gnc:register-trep-option
    (gnc:make-complex-boolean-option
     gnc:pagename-display (N_ "Memo")
-    "d"  (N_ "Display the memo?") disp-memo?
+    "d"  (N_ "Display the memo?") #t
     #f
-    (lambda (x) 
+    (lambda (x)
         (set! disp-memo? x)
-        (apply-selectable-by-name-options))))
-        
+        (apply-selectable-by-name-display-options))))
   
   ;; Ditto for Account Name #t -> Use Full Account Name is selectable
   (gnc:register-trep-option
    (gnc:make-complex-boolean-option
     gnc:pagename-display (N_ "Account Name")
-    "e"  (N_ "Display the account name?") disp-accname?
+    "e"  (N_ "Display the account name?") #t
     #f
     (lambda (x)
         (set! disp-accname? x)
-        (apply-selectable-by-name-options))))
-    
+        (apply-selectable-by-name-display-options))))
+  
   ;; Ditto for Other Account Name #t -> Use Full Other Account Name is selectable
   (gnc:register-trep-option
    (gnc:make-complex-boolean-option
     gnc:pagename-display (N_ "Other Account Name")
-    "h5"  (N_ "Display the other account name? (if this is a split transaction, this parameter is guessed).") 
-    disp-other-accname? #f
+    "h5"  (N_ "Display the other account name? (if this is a split transaction, this parameter is guessed).") #f
+    #f
     (lambda (x)
         (set! disp-other-accname? x)
-        (apply-selectable-by-name-options))))
-        
+        (apply-selectable-by-name-display-options))))
   
   (gnc:register-trep-option
    (gnc:make-multichoice-callback-option
@@ -1107,9 +1108,9 @@ disable the substring filter. This filter is case-sensitive.")
                   (N_ "Display one line per transaction, merging multiple splits where required.")))
     #f
     (lambda (x)
-      (set! is-single? (eq? x 'single))
-      (apply-selectable-by-name-options))))
-      
+        (set! is-single? (eq? x 'single))
+        (apply-selectable-by-name-display-options))))
+        
   (gnc:register-trep-option
    (gnc:make-multichoice-option
     gnc:pagename-display (N_ "Amount")
@@ -1131,7 +1132,7 @@ disable the substring filter. This filter is case-sensitive.")
              (N_ "Reverse amount display for Income and Expense Accounts."))
      (vector 'credit-accounts (N_ "Credit Accounts")
              (N_ "Reverse amount display for Liability, Payable, Equity, \
-Credit Card, and Income accounts.")))))
+Credit Card, and Income accounts."))))))
 
 
   (gnc:options-set-default-section gnc:*transaction-report-options*
