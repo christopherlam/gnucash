@@ -982,17 +982,15 @@ Credit Card, and Income accounts."))))))
       ;;# on multi-line splits we can get an empty ('()) account
       (if (null? account)
           (_ "Split Transaction")
-          (string-join
-           (append
-            (if code?
-                (list (xaccAccountGetCode account))
-                '())
-            (if name?
-                (if full-name?
-                    (list (gnc-account-get-full-name account))
-                    (list (xaccAccountGetName account)))
-                '()))
-           " ")))
+          (string-append
+           (if show-account-code?
+               (string-append (xaccAccountGetCode account) " ")
+               "")
+           (if show-account-name?
+               (if show-account-full-name?
+                   (gnc-account-get-full-name account)
+                   (xaccAccountGetName account))
+               ""))))
 
     (define (render-date renderer-key split)
       ((case renderer-key
