@@ -230,14 +230,14 @@ options specified in the Options panels."))
 (define (sortkey-get-info sortkey info)
   (cdr (assq info (cdr (assq sortkey sortkey-list)))))
 
-(define (timepair-year tp)    (gnc:timepair-get-year tp))
-(define (timepair-quarter tp) (+ (* 10 (timepair-year tp))  (gnc:timepair-get-quarter tp)))
-(define (timepair-month tp)   (+ (* 100 (timepair-year tp)) (gnc:timepair-get-month tp)))
-(define (timepair-week tp)    (+ (* 100 (timepair-year tp)) (gnc:timepair-get-week tp)))
-(define (split-week a) (timepair-week (gnc-transaction-get-date-posted (xaccSplitGetParent a))))
-(define (split-month a) (timepair-month (gnc-transaction-get-date-posted (xaccSplitGetParent a))))
-(define (split-quarter a) (timepair-quarter (gnc-transaction-get-date-posted (xaccSplitGetParent a))))
-(define (split-year a) (timepair-year (gnc-transaction-get-date-posted (xaccSplitGetParent a))))
+(define (time64-year tp)    (gnc:date-get-year (gnc-localtime tp)))
+(define (time64-quarter tp) (+ (* 10 (gnc:date-get-year (gnc-localtime tp)))  (gnc:date-get-quarter (gnc-localtime tp))))
+(define (time64-month tp)   (+ (* 100 (gnc:date-get-year (gnc-localtime tp))) (gnc:date-get-month (gnc-localtime tp))))
+(define (time64-week tp)    (+ (* 100 (gnc:date-get-year (gnc-localtime tp))) (gnc:date-to-week tp)))
+(define (split-week a) (time64-week (xaccTransGetDate (xaccSplitGetParent a))))
+(define (split-month a) (time64-month (xaccTransGetDate (xaccSplitGetParent a))))
+(define (split-quarter a) (time64-quarter (xaccTransGetDate (xaccSplitGetParent a))))
+(define (split-year a) (time64-year (xaccTransGetDate (xaccSplitGetParent a))))
 
 (define date-subtotal-list
   ;; List for date option.
@@ -987,22 +987,29 @@ Credit Card, and Income accounts."))))))
                 (width 0))
             (for-each (lambda (column merge-entry)
                         (let* ((mon (retrieve-commodity column commodity))
-                               (col (and mon (gnc:gnc-monetary-amount mon)))
+                               (column-amount (and mon (gnc:gnc-monetary-amount mon)))
                                (merge? (vector-ref merge-entry 0))
                                (merge-fn (vector-ref merge-entry 1)))
                           (if merge?
+                              ;; We're merging. Run merge-fn (usu gnc-numeric-add or sub)
+                              ;; and store total in merging-subtotal. Do NOT add column.
                               (begin
                                 (set! merging? #t)
-                                (if col
+                                (if column-amount
                                     (set! merging-subtotal
-                                          (merge-fn merging-subtotal col GNC-DENOM-AUTO GNC-RND-ROUND)))
+                                          (merge-fn merging-subtotal column-amount
+                                                    GNC-DENOM-AUTO GNC-RND-ROUND)))
                                 (set! width (+ width 1)))
+
                               (if merging?
                                   (begin
+                                    ;; We've completed merging. Add this column amount
+                                    ;; and add the column (with increased width).
                                     (set! merging? #f)
-                                    (if col
+                                    (if column-amount
                                         (set! merging-subtotal
-                                              (merge-fn merging-subtotal col GNC-DENOM-AUTO GNC-RND-ROUND)))
+                                              (merge-fn merging-subtotal column-amount
+                                                        GNC-DENOM-AUTO GNC-RND-ROUND)))
                                     (set! width (+ width 1))
                                     (addto! row-contents
                                             (gnc:make-html-table-cell/size/markup
@@ -1010,6 +1017,7 @@ Credit Card, and Income accounts."))))))
                                              (gnc:make-gnc-monetary commodity merging-subtotal)))
                                     (set! width 0)
                                     (set! merging-subtotal (gnc:make-gnc-numeric 0 1)))
+
                                   (addto! row-contents
                                           (gnc:make-html-table-cell/markup "total-number-cell" mon))))))
                       columns
@@ -1054,11 +1062,12 @@ Credit Card, and Income accounts."))))))
           ((damount (lambda (s) (if (gnc:split-voided? s)
                                     (xaccSplitVoidFormerAmount s)
                                     (xaccSplitGetAmount s))))
-           (trans-date (lambda (s) (gnc-transaction-get-date-posted (xaccSplitGetTransaction s))))
+           (trans-date (lambda (s) (xaccTransGetDate (xaccSplitGetParent s))))
            (currency (lambda (s) (xaccAccountGetCommodity (xaccSplitGetAccount s))))
            (report-currency (lambda (s) (if (opt-val gnc:pagename-general optname-common-currency)
                                             (opt-val gnc:pagename-general optname-currency)
                                             (currency s))))
+           (time64CanonicalDayTime (lambda (t64)  (gnc-tm-set-day-middle (gnc-localtime t64))))
            (convert (lambda (s num)
                       (gnc:exchange-by-pricedb-nearest
                        (gnc:make-gnc-monetary (currency s) num)
@@ -1066,7 +1075,7 @@ Credit Card, and Income accounts."))))))
                        ;; Use midday as the transaction time so it matches a price
                        ;; on the same day.  Otherwise it uses midnight which will
                        ;; likely match a price on the previous day
-                       (timespecCanonicalDayTime trans-date))))
+                       (time64CanonicalDayTime (trans-date s)))))
            (split-value (lambda (s) (convert s (damount s)))) ; used for correct debit/credit
            (amount (lambda (s) (split-value s)))
            (debit-amount (lambda (s) (if (gnc-numeric-positive-p (gnc:gnc-monetary-amount (split-value s)))
@@ -1136,8 +1145,8 @@ Credit Card, and Income accounts."))))))
          ((month) gnc:date-get-month-year-string)
          ((quarter) gnc:date-get-quarter-year-string)
          ((year) gnc:date-get-year-string))
-       (gnc:timepair->date
-        (gnc-transaction-get-date-posted
+       (gnc-localtime
+        (xaccTransGetDate
          (xaccSplitGetParent split)))))
 
     (define (render-account renderer-key split anchor?)
@@ -1544,13 +1553,13 @@ Credit Card, and Income accounts."))))))
                            (cdr
                             (assq key
                                   (list
-                                   (cons 'date (gnc-transaction-get-date-posted (xaccSplitGetParent s)))
-                                   (cons 'reconciled-date (gnc-split-get-date-reconciled s)))))))
-                   (year (lambda (s) (gnc:timepair-get-year (date s))))
-                   (month (lambda (s) (gnc:timepair-get-month (date s))))
-                   (quarter (lambda (s) (gnc:timepair-get-quarter (date s))))
-                   (week (lambda (s) (gnc:timepair-get-week (date s))))
-                   (secs (lambda (s) (gnc:timepair->secs (date s)))))
+                                   (cons 'date (xaccTransGetDate (xaccSplitGetParent s)))
+                                   (cons 'reconciled-date (xaccSplitGetDateReconciled s)))))))
+                   (year (lambda (s) (gnc:date-get-year (gnc-localtime (date s)))))
+                   (month (lambda (s) (gnc:date-get-month (gnc-localtime (date s)))))
+                   (quarter (lambda (s) (gnc:date-get-quarter (gnc-localtime (date s)))))
+                   (week (lambda (s) (gnc:date-to-week (date s))))
+                   (secs (lambda (s) (date s))))
               (cdr
                (assq date-subtotal
                      (list
