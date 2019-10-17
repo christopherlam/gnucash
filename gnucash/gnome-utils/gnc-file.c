@@ -46,6 +46,7 @@
 #include "gnc-plugin-file-history.h"
 #include "qof.h"
 #include "Scrub.h"
+#include "ScrubBudget.h"
 #include "TransLog.h"
 #include "gnc-session.h"
 #include "gnc-state.h"
@@ -1103,9 +1104,29 @@ RESTART:
         g_free ( message );
     }
 
-    // Fix account color slots being set to 'Not Set', should run once on a book
     qof_event_suspend();
+
+    // Fix account color slots being set to 'Not Set', should run once on a book
     xaccAccountScrubColorNotSet (gnc_get_current_book());
+
+    /* Fix budget signs */
+    if (gnc_scrub_budget_signs_check (new_book) &&
+        gnc_verify_dialog (parent, FALSE, (_("Hi, we notice your budgets \
+are still in 3.x format. 4.x has a new format to store budgets. We can \
+convert automatically to this new format if you like. Beware that once \
+converted you'll need at least gnucash 3.8 be able to open your book. \
+On the other hand if you want to make your own changes to your budgets \
+in 4.x you have to convert it to the new format manually. GnuCash 4.x \
+can't write the old format any more.\n\n Note the conversion may involve \
+a one-time sign correction on your budgeted values. Until you run \
+the conversion some budgeted values may show with wrong signs. \
+However for completeness there is a small chance the budgeted \
+values show up with the wrong sign after the conversion. In \
+that unfortunate case you'll have to manually correct these \
+yourself. \n\nWould you like gnucash to convert \
+your budgets now?" ))))
+        gnc_scrub_budget_signs (new_book);
+
     qof_event_resume();
 
     return TRUE;
