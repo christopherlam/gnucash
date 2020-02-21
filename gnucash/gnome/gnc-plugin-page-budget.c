@@ -932,7 +932,11 @@ estimate_budget_helper (GtkTreeModel *model, GtkTreePath *path,
     GncPluginPageBudget *page = data;
 
     g_return_if_fail(GNC_IS_PLUGIN_PAGE_BUDGET(page));
+
     priv = GNC_PLUGIN_PAGE_BUDGET_GET_PRIVATE(page);
+
+    if (!gnc_budget_allow_editing (GTK_WIDGET (priv->dialog)))
+        return;
 
     acct = gnc_budget_view_get_account_from_path (priv->budget_view, path);
 
@@ -1073,7 +1077,12 @@ allperiods_budget_helper (GtkTreeModel *model, GtkTreePath *path,
     GncPluginPageBudget *page = data;
 
     g_return_if_fail(GNC_IS_PLUGIN_PAGE_BUDGET(page));
+
     priv = GNC_PLUGIN_PAGE_BUDGET_GET_PRIVATE(page);
+
+    if (!gnc_budget_allow_editing (GTK_WIDGET (priv->dialog)))
+        return;
+
     acct = gnc_budget_view_get_account_from_path (priv->budget_view, path);
     num_periods = gnc_budget_get_num_periods (priv->budget);
     allvalue = priv->allValue;

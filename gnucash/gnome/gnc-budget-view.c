@@ -1259,6 +1259,9 @@ budget_col_edited (Account *account, GtkTreeViewColumn *col,
     budget_view = GNC_BUDGET_VIEW(g_object_get_data (G_OBJECT(col), "budget_view"));
     priv = GNC_BUDGET_VIEW_GET_PRIVATE(budget_view);
 
+    if (!gnc_budget_allow_editing (NULL))
+        return;
+
     if (new_text && *new_text == '\0')
         gnc_budget_unset_account_period_value (priv->budget, account, period_num);
     else
@@ -1689,3 +1692,30 @@ gnc_budget_view_refresh (GncBudgetView *budget_view)
     LEAVE(" ");
 }
 
+
+/* this function returns TRUE if we must allow budget cell editing:
+   the budgets have been fixed already, or the user is ready to fix
+   budgets manually. */
+gboolean gnc_budget_allow_editing (GtkWidget *window)
+{
+    QofBook *book = gnc_get_current_book();
+
+    /* feature already set. allow budget editing to continue. */
+    if (gnc_features_check_used (book, GNC_FEATURE_BUDGET_UNREVERSED))
+        return TRUE;
+
+    /* feature not set. ask user before setting feature. */
+    if (!gnc_verify_dialog (GTK_WINDOW (window), FALSE, (_ ("You are editing \
+a budget cell manually. To proceed, we need to set a feature to prevent \
+budget signs errors. This is important to fix inconsistencies in budget \
+reports. This change will cause the data to be unreadable in 3.7 or earlier. \
+If you proceed, It is important to recheck all budgets to ensure the amounts \
+signs are correct.\n\nDo you wish to proceed to set the feature, and allow \
+editing?"))))
+        /* user declined feature. abort editing. */
+        return FALSE;
+
+    /* accept feature. allow editing. */
+    gnc_features_set_used (book, GNC_FEATURE_BUDGET_UNREVERSED);
+    return TRUE;
+}
