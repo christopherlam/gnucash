@@ -805,63 +805,6 @@ also show overall period profit & loss."))
                          (map col-datum-get-split-balance-with-closing cols-data))))
            accounts))
 
-         (exchange-fn (and common-currency
-                           (gnc:case-exchange-time-fn
-                            price-source common-currency
-                            (map xaccAccountGetCommodity accounts) enddate
-                            #f #f)))
-
-         ;; this function will convert the monetary found at col-idx
-         ;; into report-currency if the latter exists. The price
-         ;; applicable to the col-idx column is used. If the monetary
-         ;; cannot be converted (eg. missing price) then it is not converted.
-         (convert-curr-fn
-          (lambda (monetary col-idx)
-            (and common-currency
-                 (not (gnc-commodity-equal
-                       (gnc:gnc-monetary-commodity monetary)
-                       common-currency))
-                 (has-price? (gnc:gnc-monetary-commodity monetary))
-                 (exchange-fn
-                  monetary common-currency
-                  (cond
-                   ((eq? price-source 'pricedb-latest) (current-time))
-                   ((eq? col-idx 'overall-period) (last report-dates))
-                   ((eq? report-type 'balsheet) (list-ref report-dates col-idx))
-                   ((eq? report-type 'pnl) (list-ref report-dates (1+ col-idx))))))))
-
-         ;; the following function generates an gnc:html-text object
-         ;; to dump exchange rate for a particular column. From the
-         ;; accountlist given, obtain commodities, and convert 1 unit
-         ;; currency into report-currency. If cannot convert due to
-         ;; missing price, say so.
-         (get-exchange-rates-fn
-          (lambda (accounts col-idx)
-            (let ((commodities (gnc:accounts-get-commodities accounts common-currency))
-                  (cell (gnc:make-html-text)))
-              (for-each
-               (lambda (commodity)
-                 (let ((orig-monetary (gnc:make-gnc-monetary commodity 1)))
-                   (if (has-price? commodity)
-                       (let* ((conv-monetary (convert-curr-fn orig-monetary col-idx))
-                              (conv-amount (gnc:gnc-monetary-amount conv-monetary)))
-                         (gnc:html-text-append!
-                          cell
-                          (format #f "~a ~a"
-                                  (gnc:monetary->string orig-monetary)
-                                  (gnc:default-price-renderer common-currency
-                                                              conv-amount))))
-                       (gnc:html-text-append!
-                        cell
-                        (string-append
-                         (format #f "~a ~a "
-                                 (gnc:monetary->string orig-monetary)
-                                 (gnc-commodity-get-nice-symbol common-currency))
-                         (_ "missing")))))
-                 (gnc:html-text-append! cell (gnc:html-markup-br)))
-               commodities)
-              (gnc:make-html-table-cell/markup "number-cell" cell))))
-
          ;; scan accounts' commodities, filter currencies only, create
          ;; hash-map counter, convert to alist, sort descending tally,
          ;; return first pair's car. result=most used currency. the
@@ -987,17 +930,71 @@ also show overall period profit & loss."))
               (sum-balances-of-accounts
                accounts-value-balances asset-liability gnc:collector+))
 
+             ;; this function will convert the monetary found at col-idx
+             ;; into report-currency if the latter exists. The price
+             ;; applicable to the col-idx column is used. If the monetary
+             ;; cannot be converted (eg. missing price) then it is not converted.
+             (convert-curr-fn
+              (lambda (monetary col-idx)
+                (and common-currency
+                     (not (gnc-commodity-equal
+                           (gnc:gnc-monetary-commodity monetary)
+                           common-currency))
+                     (has-price? (gnc:gnc-monetary-commodity monetary))
+                     (let ((date
+                            (cond
+                             ((eq? price-source 'pricedb-latest) (current-time))
+                             ((eq? col-idx 'overall-period) (last report-dates))
+                             ((eq? report-type 'balsheet) (list-ref report-dates col-idx))
+                             ((eq? report-type 'pnl) (list-ref report-dates (1+ col-idx))))))
+                       ((gnc:case-exchange-time-fn
+                         price-source common-currency
+                         (map xaccAccountGetCommodity accounts) date #f #f)
+                        monetary common-currency date)))))
+
+             ;; the following function generates an gnc:html-text object
+             ;; to dump exchange rate for a particular column. From the
+             ;; accountlist given, obtain commodities, and convert 1 unit
+             ;; currency into report-currency. If cannot convert due to
+             ;; missing price, say so.
+             (get-exchange-rates-fn
+              (lambda (accounts col-idx)
+                (let ((commodities (gnc:accounts-get-commodities accounts common-currency))
+                      (cell (gnc:make-html-text)))
+                  (for-each
+                   (lambda (commodity)
+                     (let ((orig-monetary (gnc:make-gnc-monetary commodity 1)))
+                       (if (has-price? commodity)
+                           (let* ((conv-monetary (convert-curr-fn orig-monetary col-idx))
+                                  (conv-amount (gnc:gnc-monetary-amount conv-monetary)))
+                             (gnc:html-text-append!
+                              cell
+                              (format #f "~a ~a"
+                                      (gnc:monetary->string orig-monetary)
+                                      (gnc:default-price-renderer common-currency
+                                                                  conv-amount))))
+                           (gnc:html-text-append!
+                            cell
+                            (string-append
+                             (format #f "~a ~a "
+                                     (gnc:monetary->string orig-monetary)
+                                     (gnc-commodity-get-nice-symbol common-currency))
+                             (_ "missing")))))
+                     (gnc:html-text-append! cell (gnc:html-markup-br)))
+                   commodities)
+                  (gnc:make-html-table-cell/markup "number-cell" cell))))
+
              ;; converts monetaries to common currency
              (monetaries->exchanged
               (lambda (monetaries target-currency price-source date)
-                (let ((exchange-fn (gnc:case-exchange-fn
-                                    price-source target-currency date)))
-                  (apply gnc:monetary+
-                         (cons (gnc:make-gnc-monetary target-currency 0)
-                               (map
-                                (lambda (mon)
-                                  (exchange-fn mon target-currency))
-                                (monetaries 'format gnc:make-gnc-monetary #f)))))))
+                (apply gnc:monetary+
+                       (cons (gnc:make-gnc-monetary target-currency 0)
+                             (map
+                              (lambda (mon)
+                                ((gnc:case-exchange-fn
+                                  price-source target-currency date)
+                                 mon target-currency))
+                              (monetaries 'format gnc:make-gnc-monetary #f))))))
 
              ;; the unrealized gain calculator retrieves the
              ;; asset-and-liability report-date balance and
@@ -1173,6 +1170,61 @@ also show overall period profit & loss."))
                                           (cons (car balancelist) (last balancelist))
                                           (cons (list-ref balancelist idx)
                                                 (list-ref balancelist (1+ idx))))))
+
+             ;; this function will convert the monetary found at col-idx
+             ;; into report-currency if the latter exists. The price
+             ;; applicable to the col-idx column is used. If the monetary
+             ;; cannot be converted (eg. missing price) then it is not converted.
+             (convert-curr-fn
+              (lambda (monetary col-idx)
+                (and common-currency
+                     (not (gnc-commodity-equal
+                           (gnc:gnc-monetary-commodity monetary)
+                           common-currency))
+                     (has-price? (gnc:gnc-monetary-commodity monetary))
+                     (let ((date
+                            (cond
+                             ((eq? price-source 'pricedb-latest) (current-time))
+                             ((eq? col-idx 'overall-period) (last report-dates))
+                             ((eq? report-type 'balsheet) (list-ref report-dates col-idx))
+                             ((eq? report-type 'pnl) (list-ref report-dates (1+ col-idx))))))
+                       ((gnc:case-exchange-time-fn
+                         price-source common-currency
+                         (map xaccAccountGetCommodity accounts) date
+                         #f #f)
+                        monetary common-currency date)))))
+
+             ;; the following function generates an gnc:html-text object
+             ;; to dump exchange rate for a particular column. From the
+             ;; accountlist given, obtain commodities, and convert 1 unit
+             ;; currency into report-currency. If cannot convert due to
+             ;; missing price, say so.
+             (get-exchange-rates-fn
+              (lambda (accounts col-idx)
+                (let ((commodities (gnc:accounts-get-commodities accounts common-currency))
+                      (cell (gnc:make-html-text)))
+                  (for-each
+                   (lambda (commodity)
+                     (let ((orig-monetary (gnc:make-gnc-monetary commodity 1)))
+                       (if (has-price? commodity)
+                           (let* ((conv-monetary (convert-curr-fn orig-monetary col-idx))
+                                  (conv-amount (gnc:gnc-monetary-amount conv-monetary)))
+                             (gnc:html-text-append!
+                              cell
+                              (format #f "~a ~a"
+                                      (gnc:monetary->string orig-monetary)
+                                      (gnc:default-price-renderer common-currency
+                                                                  conv-amount))))
+                           (gnc:html-text-append!
+                            cell
+                            (string-append
+                             (format #f "~a ~a "
+                                     (gnc:monetary->string orig-monetary)
+                                     (gnc-commodity-get-nice-symbol common-currency))
+                             (_ "missing")))))
+                     (gnc:html-text-append! cell (gnc:html-markup-br)))
+                   commodities)
+                  (gnc:make-html-table-cell/markup "number-cell" cell))))
 
              (get-cell-monetary-fn
               (lambda (account col-idx)
