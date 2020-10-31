@@ -361,6 +361,16 @@ balance at a given time"))
       (gnc:html-chart-set-width! chart width)
       (gnc:html-chart-set-height! chart height)
 
+      (define (merge-adjacent-slices slices)
+        (define false? (negate slice-account))
+        (define (add-amounts s t) (+ (slice-amount s) (slice-amount t)))
+        (let lp ((slices slices) (acc '()))
+          (match slices
+            (() (reverse acc))
+            (((? false? s) (? false? t) . rest)
+             (lp (cons (make-slice #f (add-amounts s t) "grey") rest) acc))
+            ((slice . rest) (lp rest (cons slice acc))))))
+
       (let lp0 ((data '()) (depth 0))
         ;; (pk 'lp data depth)
         (cond
