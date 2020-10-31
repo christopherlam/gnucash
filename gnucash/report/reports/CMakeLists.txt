@@ -21,6 +21,7 @@ set (reports_standard_with_exposed_generator_SCHEME
 
 set (reports_standard_SCHEME
     standard/account-piecharts.scm
+    standard/piechart-recursive.scm
     standard/account-summary.scm
     standard/advanced-portfolio.scm
     standard/balance-sheet.scm
