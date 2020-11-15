@@ -80,6 +80,7 @@ gnucash/gnome/dialog-print-check.c
 gnucash/gnome/dialog-progress.c
 gnucash/gnome/dialog-report-column-view.c
 gnucash/gnome/dialog-report-style-sheet.c
+gnucash/gnome/dialog-stock-editor.c
 gnucash/gnome/dialog-sx-editor2.c
 gnucash/gnome/dialog-sx-editor.c
 gnucash/gnome/dialog-sx-from-trans.c
@@ -281,6 +282,7 @@ gnucash/gtkbuilder/dialog-query-view.glade
 gnucash/gtkbuilder/dialog-report.glade
 gnucash/gtkbuilder/dialog-reset-warnings.glade
 gnucash/gtkbuilder/dialog-search.glade
+gnucash/gtkbuilder/dialog-stock-editor.glade
 gnucash/gtkbuilder/dialog-sx.glade
 gnucash/gtkbuilder/dialog-tax-info.glade
 gnucash/gtkbuilder/dialog-tax-table.glade
