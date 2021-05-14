@@ -190,29 +190,30 @@
                  (cons 'datasets #())))
     (cons 'options (list
                     (cons 'maintainAspectRatio #f)
-                    (cons 'plugins (list
-                                    (cons 'title (list
-                                                  (cons 'display #t)
-                                                  (cons 'fontStyle "")
-                                                  (cons 'text "")))))
+                    (cons 'plugins
+                          (list
+                           (cons 'title (list
+                                         (cons 'display #t)
+                                         (cons 'fontStyle "")
+                                         (cons 'text "")))
+                           (cons 'tooltip (list
+                                           (cons 'callbacks (list
+                                                             (cons 'label #f)))))
+                           (cons 'legend (list
+                                          (cons 'position 'right)
+                                          (cons 'reverse #f)
+                                          (cons 'labels (list
+                                                         (cons 'fontColor 'black)))))))
                     (cons 'animation (list
                                       (cons 'duration 0)))
                     (cons 'chartArea (list
                                       (cons 'backgroundColor "#fffdf6")))
-                    (cons 'legend (list
-                                   (cons 'position 'right)
-                                   (cons 'reverse #f)
-                                   (cons 'labels (list
-                                                  (cons 'fontColor 'black)))))
 
                     (cons 'elements (list
                                      (cons 'line (list
                                                   (cons 'tension 0)))
                                      (cons 'point (list
                                                    (cons 'pointStyle #f)))))
-                    (cons 'tooltips (list
-                                     (cons 'callbacks (list
-                                                       (cons 'label #f)))))
                     (cons 'scales (list
                                    (cons 'x (list
                                              (cons 'display #t)
@@ -342,19 +343,20 @@ function numformat(amount) {
 
 
 (define JS-setup "
-function tooltipLabel(tooltipItem,data) {
-  var datasetLabel = data.datasets[tooltipItem.datasetIndex].label || 'Other';
-  var label = data.datasets[tooltipItem.datasetIndex].data[tooltipItem.index];
-  switch (typeof(label)) {
+function tooltipLabel(data) {
+  var datasetLabel = data.dataset.label || 'Other';
+  var amt = data.parsed.y;
+  switch (typeof(amt)) {
     case 'number':
-      return datasetLabel + ': ' + numformat(label);
+      return datasetLabel + '= ' + numformat(amt);
     default:
       return '';
   }
 }
 
-function tooltipTitle(array,data) {
-  return data.labels[array[0].index]; }
+function tooltipTitle(data) {
+  return data[0].label;
+}
 
 // copy font info from css into chartjs.
 bodyStyle = window.getComputedStyle (document.querySelector ('body'));
@@ -447,8 +449,8 @@ document.getElementById(chartid).onclick = function(evt) {
       (push "chartjsoptions.options.scales.x.ticks.callback = xAxisDisplay;\n")
       (push "function xAxisDisplay(value,index,values) { return chartjsoptions.data.labels[index]; };\n"))
 
-    (push "chartjsoptions.options.tooltips.callbacks.label = tooltipLabel;\n")
-    (push "chartjsoptions.options.tooltips.callbacks.title = tooltipTitle;\n")
+    (push "chartjsoptions.options.plugins.tooltip.callbacks.label = tooltipLabel;\n")
+    (push "chartjsoptions.options.plugins.tooltip.callbacks.title = tooltipTitle;\n")
     (push JS-setup)
 
     (push "var myChart = new Chart(chartid, chartjsoptions);\n")
