@@ -71,7 +71,6 @@ enum
      MASK_POSITIVE = 1,
      MASK_ZERO     = 2,
      MASK_NEGATIVE = 4,
-     MASK_CAPITALIZE = 8
 };
 
 /** STRUCTS *********************************************************/
@@ -97,7 +96,6 @@ struct _StockEditorWindow
     GtkWidget *dividend_acc;
     GtkWidget *capgains_acc;
     GtkWidget *expenses_acc;
-    GtkWidget *expenses_capitalize;
 
     GNCAmountEdit *stockamt_val;
     GNCAmountEdit *stockval_val;
@@ -403,19 +401,6 @@ be valid.")));
 }
 
 static void
-capitalize_toggled_cb (GtkWidget *widget, const StockEditorWindow *data)
-{
-    if (!gtk_widget_get_sensitive (GTK_WIDGET (data->expenses_val)))
-        return;
-
-    gtk_widget_set_sensitive
-        (GTK_WIDGET (data->expenses_acc),
-         !gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (data->expenses_capitalize)));
-
-    refresh_all (widget, data);
-}
-
-static void
 capgains_cb (GtkWidget *widget, const StockEditorWindow *data)
 {
     gboolean has_capg = gtk_widget_get_sensitive (data->capgains_acc);
@@ -471,17 +456,12 @@ action_changed_cb (GtkWidget *widget, const StockEditorWindow *data)
     gtk_widget_set_sensitive (GTK_WIDGET (data->expenses_val), expenses_mask);
     gtk_widget_set_sensitive (GTK_WIDGET (data->expenses_acc), expenses_mask);
     gtk_widget_set_sensitive (GTK_WIDGET (data->expenses_memo), expenses_mask);
-    gtk_widget_set_sensitive (GTK_WIDGET (data->expenses_capitalize), expenses_mask);
 
     gtk_entry_set_text (GTK_ENTRY (data->proceeds_memo), proceeds_memo);
     gtk_entry_set_text (GTK_ENTRY (data->dividend_memo), dividend_memo);
     gtk_entry_set_text (GTK_ENTRY (data->capgains_memo), capgains_memo);
     gtk_entry_set_text (GTK_ENTRY (data->expenses_memo), expenses_memo);
 
-    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (data->expenses_capitalize),
-                                  expenses_mask & MASK_CAPITALIZE);
-
-    /* capitalize_toggled_cb (widget, data); */
     capgains_cb (widget, data);
 }
 
@@ -524,8 +504,6 @@ ok_button_cb (GtkWidget *widget, StockEditorWindow *data)
     Transaction *txn = xaccMallocTransaction (gnc_get_current_book ());
     const time64 date = gnc_date_edit_get_date (GNC_DATE_EDIT (data->date_entry));
     const gchar *desc = gtk_entry_get_text (GTK_ENTRY (data->description_entry));
-    const gboolean expenses_capitalize = gtk_toggle_button_get_active
-        (GTK_TOGGLE_BUTTON (data->expenses_capitalize));
 
     gnc_suspend_gui_refresh ();
 
@@ -537,13 +515,7 @@ ok_button_cb (GtkWidget *widget, StockEditorWindow *data)
     create_split (txn, data->asset_account, data->stockacc_memo, data->stockamt_val, data->stockval_val, FALSE);
     create_split (txn, proceeds_acc, data->proceeds_memo, data->proceeds_val, data->proceeds_val, FALSE);
     create_split (txn, dividend_acc, data->dividend_memo, data->dividend_val, data->dividend_val, FALSE);
-
-    create_split (txn,
-                  expenses_capitalize ? data->asset_account : expenses_acc,
-                  data->expenses_memo,
-                  expenses_capitalize ? NULL : data->expenses_val,
-                  data->expenses_val,
-                  FALSE);
+    create_split (txn, expenses_acc, data->expenses_memo, data->expenses_val, data->expenses_val, FALSE);
 
     if (capgains_acc)
     {
@@ -645,7 +617,7 @@ initialize_action (GtkWidget *combobox, gnc_numeric balance)
                     MASK_NEGATIVE, _("Source"),
                     MASK_DISABLED, "",
                     MASK_DISABLED, "",
-                    MASK_ZERO | MASK_POSITIVE | MASK_CAPITALIZE, _("Fees"));
+                    MASK_ZERO | MASK_POSITIVE, _("Fees"));
 
         add_action (store, _("Sell"),
                     MASK_NEGATIVE,
@@ -703,7 +675,7 @@ initialize_action (GtkWidget *combobox, gnc_numeric balance)
                     MASK_POSITIVE, _("Source"),
                     MASK_DISABLED, "",
                     MASK_DISABLED, "",
-                    MASK_POSITIVE | MASK_ZERO | MASK_CAPITALIZE, _("Fees"));
+                    MASK_POSITIVE | MASK_ZERO, _("Fees"));
 
         add_action (store, _("Short Buy"),
                     MASK_POSITIVE,
@@ -753,7 +725,7 @@ initialize_action (GtkWidget *combobox, gnc_numeric balance)
                     MASK_NEGATIVE, _("Source"),
                     MASK_DISABLED, "",
                     MASK_DISABLED, "",
-                    MASK_POSITIVE | MASK_ZERO | MASK_CAPITALIZE, _("Fees"));
+                    MASK_POSITIVE | MASK_ZERO, _("Fees"));
 
         add_action (store, _("Open Short"),
                     MASK_NEGATIVE,
@@ -761,7 +733,7 @@ initialize_action (GtkWidget *combobox, gnc_numeric balance)
                     MASK_POSITIVE, _("Source"),
                     MASK_DISABLED, "",
                     MASK_DISABLED, "",
-                    MASK_POSITIVE | MASK_ZERO | MASK_CAPITALIZE, _("Fees"));
+                    MASK_POSITIVE | MASK_ZERO, _("Fees"));
     }
     gtk_combo_box_set_model (GTK_COMBO_BOX (combobox), GTK_TREE_MODEL (store));
     gtk_combo_box_set_active (GTK_COMBO_BOX (combobox), 0);
@@ -882,10 +854,6 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     data->dividend_memo = GTK_WIDGET (gtk_builder_get_object (builder, "dividend_memo"));
     data->capgains_memo = GTK_WIDGET (gtk_builder_get_object (builder, "capgains_memo"));
     data->expenses_memo = GTK_WIDGET (gtk_builder_get_object (builder, "expenses_memo"));
-    data->expenses_capitalize = GTK_WIDGET (gtk_builder_get_object (builder, "expenses_capitalize"));
-
-    g_signal_connect (data->expenses_capitalize, "toggled",
-                      G_CALLBACK (capitalize_toggled_cb), data);
 
     /* Autoconnect signals */
     /* gtk_builder_connect_signals_full (builder, gnc_builder_connect_full_func, */
