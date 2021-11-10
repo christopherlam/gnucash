@@ -182,47 +182,48 @@ amount_edit_get_amount (GNCAmountEdit *gae)
 }
 
 
-static gboolean
+static void
 check_acct (GtkWidget *gas, GNCAmountEdit *gae,
-            GList **status, gchar *type)
+            GList **status, gchar *type, gboolean *passes)
 {
     Account *acct;
     if (!gtk_widget_get_sensitive (gas) ||
         (gnc_numeric_zero_p (amount_edit_get_amount (gae))))
-        return TRUE;
+        return;
 
     acct = gnc_account_sel_get_account (GNC_ACCOUNT_SEL (gas));
     if (!acct)
     {
         *status = g_list_prepend
             (*status, g_strdup_printf (_("Account %s missing"), type));
-        return FALSE;
+        *passes = FALSE;
+        return;
     }
     else if (xaccAccountGetPlaceholder (acct))
     {
         *status = g_list_prepend
             (*status, g_strdup_printf (_("Account %s cannot be placeholder"), type));
-        return FALSE;
+        *passes = FALSE;
+        return;
     }
 
-    return TRUE;
+    return;
 }
 
-static gboolean
+static void
 check_signs (GNCAmountEdit *gae, gint mask, GList **status,
-             gchar *type)
+             gchar *type, gboolean *passes)
 {
     GList *signs = NULL;
     gchar *sign_str;
     gnc_numeric num = amount_edit_get_amount (gae);
-    gboolean passes = TRUE;
     int cmp = gnc_numeric_compare (num, gnc_numeric_zero ());
     unsigned val_mask = cmp > 0 ? MASK_POSITIVE : cmp < 0 ? MASK_NEGATIVE : MASK_ZERO;
 
     if (!mask)
     {
         gtk_entry_set_placeholder_text (gae->entry, NULL);
-        return TRUE;
+        return;
     }
 
     if (mask & MASK_POSITIVE)
@@ -236,7 +237,7 @@ check_signs (GNCAmountEdit *gae, gint mask, GList **status,
 
     if (!(val_mask & mask))
     {
-        passes = FALSE;
+        *passes = FALSE;
         *status = g_list_prepend (*status, g_strdup_printf (_("%s must be %s"),
                                                             type, sign_str));
     }
@@ -245,7 +246,7 @@ check_signs (GNCAmountEdit *gae, gint mask, GList **status,
 
     g_list_free_full (signs, g_free);
     g_free (sign_str);
-    return passes;
+    return;
 }
 
 static void
@@ -349,10 +350,10 @@ refresh_all (GtkWidget *widget, const StockEditorWindow *data)
     }
 
     /* if a required account is missing, bail out. */
-    passes = check_acct (data->proceeds_acc, data->proceeds_val, &status, _("Proceeds"));
-    passes = check_acct (data->expenses_acc, data->expenses_val, &status, _("Fees")) && passes;
-    passes = check_acct (data->capgains_acc, data->capgains_val, &status, _("CapGains")) && passes;
-    passes = check_acct (data->dividend_acc, data->dividend_val, &status, _("Dividend")) && passes;
+    check_acct (data->proceeds_acc, data->proceeds_val, &status, _("Proceeds"), &passes);
+    check_acct (data->expenses_acc, data->expenses_val, &status, _("Fees"), &passes);
+    check_acct (data->capgains_acc, data->capgains_val, &status, _("CapGains"), &passes);
+    check_acct (data->dividend_acc, data->dividend_val, &status, _("Dividend"), &passes);
 
     /* warn if date < latest split - current balance will not be correct */
     if (time64CanonicalDayTime (gnc_date_edit_get_date (GNC_DATE_EDIT (data->date_entry))) <
@@ -364,12 +365,12 @@ be valid.")));
     }
 
     /* test the signs of various field amounts */
-    passes = check_signs (data->stockamt_val, stockamt_mask, &status, _("Units")) && passes;
-    passes = check_signs (data->stockval_val, stockval_mask, &status, _("Basis")) && passes;
-    passes = check_signs (data->proceeds_val, proceeds_mask, &status, _("Proceeds")) && passes;
-    passes = check_signs (data->dividend_val, dividend_mask, &status, _("Dividend")) && passes;
-    passes = check_signs (data->capgains_val, capgains_mask, &status, _("CapGains")) && passes;
-    passes = check_signs (data->expenses_val, expenses_mask, &status, _("Fees")) && passes;
+    check_signs (data->stockamt_val, stockamt_mask, &status, _("Units"), &passes);
+    check_signs (data->stockval_val, stockval_mask, &status, _("Basis"), &passes);
+    check_signs (data->proceeds_val, proceeds_mask, &status, _("Proceeds"), &passes);
+    check_signs (data->dividend_val, dividend_mask, &status, _("Dividend"), &passes);
+    check_signs (data->capgains_val, capgains_mask, &status, _("CapGains"), &passes);
+    check_signs (data->expenses_val, expenses_mask, &status, _("Fees"), &passes);
     update_price (stockamt_val, stockval_val, data->trans_currency, data, printinfo);
 
     /* test for imbalance */
