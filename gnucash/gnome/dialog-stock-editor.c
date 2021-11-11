@@ -74,7 +74,7 @@ enum
 };
 
 /** STRUCTS *********************************************************/
-struct _StockEditorWindow
+typedef struct StockEditorWindow
 {
     Account *asset_account;        /* The stock account */
     gnc_commodity *trans_currency;
@@ -116,9 +116,7 @@ struct _StockEditorWindow
 
     GtkWidget *ok_button;
     GtkWidget *cancel_button;
-};
-
-typedef struct _StockEditorWindow StockEditorWindow;
+} StockEditorWindow;
 
 
 static void
