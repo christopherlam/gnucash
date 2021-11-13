@@ -74,6 +74,16 @@ enum
 };
 
 /** STRUCTS *********************************************************/
+
+typedef struct AccountData
+{
+    GtkWidget *account_sel;
+    GtkWidget *amount_edit;
+    GtkWidget *desc;
+    GtkWidget *memo;
+} AccountData;
+
+
 typedef struct StockEditorWindow
 {
     Account *asset_account;        /* The stock account */
@@ -91,6 +101,12 @@ typedef struct StockEditorWindow
 
     GtkWidget *warning_icon;
     GtkWidget *warning_text;
+
+    AccountData *proceeds_data;
+    AccountData *dividend_data;
+    AccountData *capgains_data;
+    AccountData *fees_exp_data;
+    AccountData *fees_cap_data;
 
     GtkWidget *proceeds_acc;
     GtkWidget *dividend_acc;
@@ -746,6 +762,92 @@ account_get_latest_date (const Account *account)
     return last ? xaccTransGetDate (xaccSplitGetParent (last->data)) : -INT64_MAX;
 }
 
+static void combo_changed    (GtkComboBox*, GtkAssistant*);
+static void button_toggled   (GtkCheckButton*, GtkAssistant*);
+static void assistant_cancel (GtkAssistant*, gpointer);
+static void assistant_close  (GtkAssistant*, gpointer);
+
+typedef struct {
+    GtkWidget *widget;
+    gint index;
+    const gchar *title;
+    GtkAssistantPageType type;
+    gboolean complete;
+} PageInfo;
+
+/* If there is text in the GtkEntry, set the page as complete. Otherwise,
+ * stop the user from progressing the next page. */
+static void
+combo_changed (GtkComboBox *entry, GtkAssistant *assistant)
+{
+    gint num = gtk_assistant_get_current_page (assistant);
+    GtkWidget *page = gtk_assistant_get_nth_page (assistant, num);
+    gtk_assistant_set_page_complete (assistant, page, TRUE);
+}
+
+/* If the check button is toggled, set the page as complete. Otherwise,
+ * stop the user from progressing the next page. */
+static void
+button_toggled (GtkCheckButton *toggle, GtkAssistant *assistant)
+{
+    gboolean active = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (toggle));
+    gtk_assistant_set_page_complete (assistant, GTK_WIDGET (toggle), active);
+}
+
+
+/* If the dialog is cancelled, delete it from memory and then clean up after
+ * the Assistant structure. */
+static void
+assistant_cancel (GtkAssistant *assistant,
+                  gpointer data)
+{
+    gtk_widget_destroy (GTK_WIDGET (assistant));
+}
+
+/* This function is where you would apply the changes and destroy the assistant. */
+static void
+assistant_close (GtkAssistant *assistant,
+                 gpointer data)
+{
+    g_print ("You would apply your changes now!\n");
+    gtk_widget_destroy (GTK_WIDGET (assistant));
+}
+
+static AccountData *
+add_assistant_account_page (GtkWidget *grid,
+                            gchar *account_label, gchar *amount_label,
+                            gchar *description_label, gchar *memo_label,
+                            gchar *explanation_label)
+{
+    GtkWidget *cell;
+    AccountData *datum = g_new (AccountData, 1);
+
+    cell = gtk_label_new (account_label);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 0, 1, 1);
+    datum->account_sel = GTK_WIDGET (gnc_account_sel_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->account_sel, 1, 0, 1, 1);
+
+    cell = gtk_label_new (amount_label);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 1, 1, 1);
+    datum->amount_edit = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->amount_edit, 1, 1, 1, 1);
+
+    cell = gtk_label_new (description_label);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 2, 1, 1);
+    datum->desc = GTK_WIDGET (gtk_entry_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->desc, 1, 2, 1, 1);
+
+    cell = gtk_label_new (memo_label);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 3, 1, 1);
+    datum->memo = GTK_WIDGET (gtk_entry_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->memo, 1, 3, 1, 1);
+
+    cell = gtk_label_new (explanation_label);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 4, 2, 1);
+
+    return datum;
+}
+
 /********************************************************************   \
  * stockeditorWindow                                                *
  *   opens up the window to stock-editor                            *
@@ -759,17 +861,157 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     GtkBuilder *builder;
     GList *types;
     StockEditorWindow *data;
+    GtkWidget *assistant, *combo, *label, *button, *progress, *hbox, *gae;
+    guint i;
+    gnc_numeric prev_bal = xaccAccountGetBalance (account);
+    gnc_commodity *currency = xaccAccountGetCommodity (account);
+    GNCPrintAmountInfo printinfo = gnc_commodity_print_info (currency, TRUE);
+    PageInfo page[9] = {
+        { NULL, -1, "Introduction",           GTK_ASSISTANT_PAGE_INTRO,    TRUE},
+        { NULL, -1, "Select Action",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Stock Account",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Proceeds Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Capitalized Fees",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Expensed Fees",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Dividend Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Capital Gains Account",  GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Confirmation",           GTK_ASSISTANT_PAGE_CONFIRM,  TRUE},
+    };
 
     g_return_if_fail (parent);
     g_return_if_fail (GNC_IS_ACCOUNT (account));
+
+    data = g_new (StockEditorWindow, 1);
+
+    /* Create a new assistant widget with no pages. */
+    assistant = gtk_assistant_new ();
+    gtk_widget_set_size_request (assistant, 600, 400);
+    gtk_window_set_title (GTK_WINDOW (assistant), "Stock Assistant");
+    /* g_signal_connect (G_OBJECT (assistant), "destroy", */
+    /*                   G_CALLBACK (gtk_main_quit), NULL); */
+
+    page[0].widget = gtk_label_new ("Stock Assistant");
+    page[1].widget = gtk_grid_new (); /* select action */
+    page[2].widget = gtk_grid_new (); /* stock acct */
+    page[3].widget = gtk_grid_new (); /* proceeds */
+    page[4].widget = gtk_grid_new (); /* cap fees */
+    page[5].widget = gtk_grid_new (); /* exp fees */
+    page[6].widget = gtk_grid_new (); /* dividend */
+    page[7].widget = gtk_grid_new (); /* capgains */
+    page[8].widget = gtk_label_new ("Text has been entered in the label and the\n"\
+                                    "combo box is clicked. If you are done, then\n"\
+                                    "it is time to leave!");
+
+    /* Action Page */
+    label = gtk_label_new ("Select Action");
+    combo = gtk_combo_box_new ();
+    initialize_action (combo, prev_bal);
+    gtk_grid_attach (GTK_GRID (page[1].widget), label, 0, 0, 1, 1);
+    gtk_grid_attach (GTK_GRID (page[1].widget), combo, 1, 0, 1, 1);
+
+    /* Stock Page */
+    label = gtk_label_new ("Previous Balance");
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 0, 1, 1);
+    label = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 1, 0, 1, 1);
+
+    label = gtk_label_new ("Number units purchased");
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 1, 1, 1);
+    gae = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 1, 1, 1);
+
+    label = gtk_label_new ("New Balance");
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 2, 1, 1);
+    label = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 1, 2, 1, 1);
+
+    gtk_grid_attach (GTK_GRID (page[2].widget),
+                     gtk_separator_new (GTK_ORIENTATION_HORIZONTAL), 0, 3, 2, 1);
+
+    label = gtk_label_new ("Value of units purchased");
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 4, 1, 1);
+    gae = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 4, 1, 1);
+
+    label = gtk_label_new ("Price of units purchased");
+    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 5, 1, 1);
+    gae = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 5, 1, 1);
+
+    data->proceeds_data = add_assistant_account_page
+        (page[3].widget, "Proceeds Account", "Proceeds Amount",
+         "Proceeds Description", "Proceeds Memo",
+         "Source or destination of funds");
+
+    data->fees_cap_data = add_assistant_account_page
+        (page[4].widget, "Fees (capitalized) Account", "Fees (capitalized) Amount",
+         "Fees (capitalized) Description", "Fees (capitalized) Memo",
+         "Fees capitalized into stock account; this is "
+         "usually only used on stock sell transactions");
+
+    data->fees_exp_data = add_assistant_account_page
+        (page[5].widget, "Fees (expensed) Account", "Fees (expensed) Amount",
+         "Fees (expensed) Description", "Fees (expensed) Memo",
+         "Fees expensed; applies to stock purchases.");
+
+    data->dividend_data = add_assistant_account_page
+        (page[6].widget, "Dividend Account", "Dividend Amount",
+         "Dividend Description", "Dividend Memo",
+         "Dividend amount recorded");
+
+    data->capgains_data = add_assistant_account_page
+        (page[7].widget, "Capital Gains Account", "Capital Gains Amount",
+         "Capital Gains Description", "Capital Gains Memo",
+         "Capital Gains recorded");
+
+    /* Create the necessary widgets for the fourth page. The, Attach the progress bar
+     * to the GtkAlignment widget for later access.*/
+    /*
+    button = gtk_button_new_with_label ("Click me!");
+    progress = gtk_progress_bar_new ();
+    hbox = gtk_hbox_new (FALSE, 5);
+    gtk_box_pack_start (GTK_BOX (hbox), progress, TRUE, FALSE, 5);
+    gtk_box_pack_start (GTK_BOX (hbox), button, FALSE, FALSE, 5);
+    gtk_container_add (GTK_CONTAINER (page[3].widget), hbox);
+    g_object_set_data (G_OBJECT (page[3].widget), "pbar", (gpointer) progress);
+    */
+
+    /* Add five pages to the GtkAssistant dialog. */
+    for (i = 0; i < 9; i++)
+    {
+        page[i].index = gtk_assistant_append_page (GTK_ASSISTANT (assistant),
+                                                   page[i].widget);
+        gtk_assistant_set_page_title (GTK_ASSISTANT (assistant),
+                                      page[i].widget, page[i].title);
+        gtk_assistant_set_page_type (GTK_ASSISTANT (assistant),
+                                     page[i].widget, page[i].type);
+
+        /* Set the introduction and conclusion pages as complete so they can be
+         * incremented or closed. */
+        gtk_assistant_set_page_complete (GTK_ASSISTANT (assistant),
+                                         page[i].widget, page[i].complete);
+    }
+
+    /* Update whether pages 2 through 4 are complete based upon whether there is
+     * text in the GtkEntry, the check button is active, or the progress bar
+     * is completely filled. */
+    g_signal_connect (G_OBJECT (combo), "changed",
+                      G_CALLBACK (combo_changed), (gpointer) assistant);
+    /* g_signal_connect (G_OBJECT (page[2].widget), "toggled", */
+    /*                   G_CALLBACK (button_toggled), (gpointer) assistant); */
+    g_signal_connect (G_OBJECT (assistant), "cancel",
+                      G_CALLBACK (assistant_cancel), NULL);
+    g_signal_connect (G_OBJECT (assistant), "close",
+                      G_CALLBACK (assistant_close), NULL);
+
+    gtk_widget_show_all (assistant);
+    return;
 
     if (!xaccAccountIsPriced (account))
     {
         PWARN ("Stock Editor for Stock accounts only");
         return;
     }
-
-    data = g_new0 (StockEditorWindow, 1);
 
     data->asset_account = account;
     data->trans_currency = gnc_account_get_currency_or_parent (account);
