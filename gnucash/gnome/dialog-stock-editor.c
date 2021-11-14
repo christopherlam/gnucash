@@ -84,6 +84,16 @@ typedef struct AccountData
 } AccountData;
 
 
+typedef struct StockAccountData
+{
+    GtkWidget *amount_edit;
+    GtkWidget *new_bal;
+    GtkWidget *value_edit;
+    GtkWidget *price_label;
+    GtkWidget *desc;
+    GtkWidget *memo;
+} StockAccountData;
+
 typedef struct StockEditorWindow
 {
     Account *asset_account;        /* The stock account */
@@ -102,6 +112,7 @@ typedef struct StockEditorWindow
     GtkWidget *warning_icon;
     GtkWidget *warning_text;
 
+    StockAccountData *stock_data;
     AccountData *proceeds_data;
     AccountData *dividend_data;
     AccountData *capgains_data;
@@ -813,6 +824,46 @@ assistant_close (GtkAssistant *assistant,
     gtk_widget_destroy (GTK_WIDGET (assistant));
 }
 
+static StockAccountData *
+add_assistant_stock_page (GtkWidget *grid, const Account *account)
+{
+    GtkWidget *label, *cell;
+    StockAccountData *datum = g_new (StockAccountData, 1);
+    gnc_numeric prev_bal = xaccAccountGetBalance (account);
+    gnc_commodity *currency = xaccAccountGetCommodity (account);
+    GNCPrintAmountInfo printinfo = gnc_commodity_print_info (currency, TRUE);
+
+    label = gtk_label_new ("Previous Balance");
+    gtk_grid_attach (GTK_GRID (grid), label, 0, 0, 1, 1);
+    cell = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
+    gtk_grid_attach (GTK_GRID (grid), cell, 1, 0, 1, 1);
+
+    label = gtk_label_new ("Number units purchased");
+    gtk_grid_attach (GTK_GRID (grid), label, 0, 1, 1, 1);
+    datum->amount_edit = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->amount_edit, 1, 1, 1, 1);
+
+    label = gtk_label_new ("New Balance");
+    gtk_grid_attach (GTK_GRID (grid), label, 0, 2, 1, 1);
+    datum->new_bal = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
+    gtk_grid_attach (GTK_GRID (grid), datum->new_bal, 1, 2, 1, 1);
+
+    gtk_grid_attach (GTK_GRID (grid),
+                     gtk_separator_new (GTK_ORIENTATION_HORIZONTAL), 0, 3, 2, 1);
+
+    label = gtk_label_new ("Value of units purchased");
+    gtk_grid_attach (GTK_GRID (grid), label, 0, 4, 1, 1);
+    datum->value_edit = GTK_WIDGET (gnc_amount_edit_new ());
+    gtk_grid_attach (GTK_GRID (grid), datum->value_edit, 1, 4, 1, 1);
+
+    label = gtk_label_new ("Price of units purchased");
+    gtk_grid_attach (GTK_GRID (grid), label, 0, 5, 1, 1);
+    datum->price_label = gtk_label_new (NULL);
+    gtk_grid_attach (GTK_GRID (grid), datum->price_label, 1, 5, 1, 1);
+
+    return datum;
+}
+
 static AccountData *
 add_assistant_account_page (GtkWidget *grid,
                             gchar *account_label, gchar *amount_label,
@@ -863,19 +914,16 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     StockEditorWindow *data;
     GtkWidget *assistant, *combo, *label, *button, *progress, *hbox, *gae;
     guint i;
-    gnc_numeric prev_bal = xaccAccountGetBalance (account);
-    gnc_commodity *currency = xaccAccountGetCommodity (account);
-    GNCPrintAmountInfo printinfo = gnc_commodity_print_info (currency, TRUE);
     PageInfo page[9] = {
         { NULL, -1, "Introduction",           GTK_ASSISTANT_PAGE_INTRO,    TRUE},
         { NULL, -1, "Select Action",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Stock Account",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Confirmation",           GTK_ASSISTANT_PAGE_CONFIRM,  TRUE},
         { NULL, -1, "Proceeds Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Capitalized Fees",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Expensed Fees",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Dividend Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Capital Gains Account",  GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Confirmation",           GTK_ASSISTANT_PAGE_CONFIRM,  TRUE},
     };
 
     g_return_if_fail (parent);
@@ -904,39 +952,13 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
 
     /* Action Page */
     label = gtk_label_new ("Select Action");
-    combo = gtk_combo_box_new ();
-    initialize_action (combo, prev_bal);
+    combo = gtk_combo_box_text_new ();
+    initialize_action (combo, xaccAccountGetBalance (account));
     gtk_grid_attach (GTK_GRID (page[1].widget), label, 0, 0, 1, 1);
     gtk_grid_attach (GTK_GRID (page[1].widget), combo, 1, 0, 1, 1);
 
     /* Stock Page */
-    label = gtk_label_new ("Previous Balance");
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 0, 1, 1);
-    label = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 1, 0, 1, 1);
-
-    label = gtk_label_new ("Number units purchased");
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 1, 1, 1);
-    gae = GTK_WIDGET (gnc_amount_edit_new ());
-    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 1, 1, 1);
-
-    label = gtk_label_new ("New Balance");
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 2, 1, 1);
-    label = gtk_label_new (xaccPrintAmount (prev_bal, printinfo));
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 1, 2, 1, 1);
-
-    gtk_grid_attach (GTK_GRID (page[2].widget),
-                     gtk_separator_new (GTK_ORIENTATION_HORIZONTAL), 0, 3, 2, 1);
-
-    label = gtk_label_new ("Value of units purchased");
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 4, 1, 1);
-    gae = GTK_WIDGET (gnc_amount_edit_new ());
-    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 4, 1, 1);
-
-    label = gtk_label_new ("Price of units purchased");
-    gtk_grid_attach (GTK_GRID (page[2].widget), label, 0, 5, 1, 1);
-    gae = GTK_WIDGET (gnc_amount_edit_new ());
-    gtk_grid_attach (GTK_GRID (page[2].widget), gae, 1, 5, 1, 1);
+    data->stock_data = add_assistant_stock_page (page[2].widget, account);
 
     data->proceeds_data = add_assistant_account_page
         (page[3].widget, "Proceeds Account", "Proceeds Amount",
@@ -977,7 +999,7 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     */
 
     /* Add five pages to the GtkAssistant dialog. */
-    for (i = 0; i < 9; i++)
+    for (i = 0; i < 4; i++)
     {
         page[i].index = gtk_assistant_append_page (GTK_ASSISTANT (assistant),
                                                    page[i].widget);
@@ -1004,7 +1026,9 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     g_signal_connect (G_OBJECT (assistant), "close",
                       G_CALLBACK (assistant_close), NULL);
 
+    g_warning ("1");
     gtk_widget_show_all (assistant);
+    g_warning ("2");
     return;
 
     if (!xaccAccountIsPriced (account))
