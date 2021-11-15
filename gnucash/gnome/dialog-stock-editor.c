@@ -777,9 +777,8 @@ account_get_latest_date (const Account *account)
 }
 
 static void combo_changed    (GtkComboBox*, StockEditorWindow*);
-static void button_toggled   (GtkCheckButton*, GtkAssistant*);
-static void assistant_cancel (GtkAssistant*, gpointer);
-static void assistant_close  (GtkAssistant*, gpointer);
+static void assistant_cancel (GtkAssistant*,StockEditorWindow *);
+static void assistant_close  (GtkAssistant*, StockEditorWindow *);
 
 typedef struct {
     GtkWidget *widget;
@@ -814,43 +813,38 @@ combo_changed (GtkComboBox *entry, StockEditorWindow *data)
                         ACTION_COL_EXPENSES_MASK, &expenses_mask,
                         -1);
 
-    gtk_widget_set_visible (data->stock_data->page, (stockamt_mask || stockval_mask));
+    gtk_widget_set_visible (data->stock_data->page, stockamt_mask || stockval_mask);
     gtk_widget_set_visible (data->proceeds_data->page, proceeds_mask);
     gtk_widget_set_visible (data->capgains_data->page, capgains_mask);
     gtk_widget_set_visible (data->fees_cap_data->page, expenses_mask);
     gtk_widget_set_visible (data->fees_exp_data->page, expenses_mask);
     gtk_widget_set_visible (data->dividend_data->page, dividend_mask);
-    gtk_widget_set_visible (data->capgains_data->page, capgains_mask);
 
     gtk_assistant_set_page_complete (assistant, page, TRUE);
-}
-
-/* If the check button is toggled, set the page as complete. Otherwise,
- * stop the user from progressing the next page. */
-static void
-button_toggled (GtkCheckButton *toggle, GtkAssistant *assistant)
-{
-    gboolean active = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (toggle));
-    gtk_assistant_set_page_complete (assistant, GTK_WIDGET (toggle), active);
 }
 
 
 /* If the dialog is cancelled, delete it from memory and then clean up after
  * the Assistant structure. */
 static void
-assistant_cancel (GtkAssistant *assistant,
-                  gpointer data)
+assistant_cancel (GtkAssistant *assistant, StockEditorWindow *data)
 {
+    g_free (data->stock_data);
+    g_free (data->proceeds_data);
+    g_free (data->capgains_data);
+    g_free (data->fees_exp_data);
+    g_free (data->fees_cap_data);
+    g_free (data->dividend_data);
+    g_free (data);
     gtk_widget_destroy (GTK_WIDGET (assistant));
 }
 
 /* This function is where you would apply the changes and destroy the assistant. */
 static void
-assistant_close (GtkAssistant *assistant,
-                 gpointer data)
+assistant_close (GtkAssistant *assistant, StockEditorWindow *data)
 {
     g_print ("You would apply your changes now!\n");
-    gtk_widget_destroy (GTK_WIDGET (assistant));
+    assistant_cancel (assistant, data);;
 }
 
 static StockAccountData *
@@ -1055,10 +1049,12 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     /* g_signal_connect (G_OBJECT (page[2].widget), "toggled", */
     /*                   G_CALLBACK (button_toggled), (gpointer) assistant); */
     g_signal_connect (G_OBJECT (data->assistant), "cancel",
-                      G_CALLBACK (assistant_cancel), NULL);
+                      G_CALLBACK (assistant_cancel), (gpointer) data);
     g_signal_connect (G_OBJECT (data->assistant), "close",
-                      G_CALLBACK (assistant_close), NULL);
+                      G_CALLBACK (assistant_close), (gpointer) data);
 
+    /* initialize page visibilities */
+    combo_changed (GTK_COMBO_BOX (combo), data);
     gtk_widget_show_all (data->assistant);
     return;
 
