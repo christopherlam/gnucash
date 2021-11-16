@@ -92,7 +92,6 @@ typedef struct StockAccountData
     GtkWidget *new_bal;
     GtkWidget *value_edit;
     GtkWidget *price_label;
-    GtkWidget *desc;
     GtkWidget *memo;
 } StockAccountData;
 
@@ -892,11 +891,12 @@ add_assistant_stock_page (GtkWidget *grid, const Account *account)
 static AccountData *
 add_assistant_account_page (GtkWidget *grid,
                             gchar *account_label, gchar *amount_label,
-                            gchar *description_label, gchar *memo_label,
-                            gchar *explanation_label)
+                            gchar *memo_label, gchar *explanation_label,
+                            GList *types, gnc_commodity *currency)
 {
     GtkWidget *cell;
     AccountData *datum = g_new (AccountData, 1);
+    GList *commodities = g_list_prepend (NULL, currency);
 
     datum->page = grid;
 
@@ -905,24 +905,23 @@ add_assistant_account_page (GtkWidget *grid,
     datum->account_sel = GTK_WIDGET (gnc_account_sel_new ());
     gtk_grid_attach (GTK_GRID (grid), datum->account_sel, 1, 0, 1, 1);
 
+    gnc_account_sel_set_acct_filters (GNC_ACCOUNT_SEL (datum->account_sel),
+                                      types, commodities);
+
     cell = gtk_label_new (amount_label);
     gtk_grid_attach (GTK_GRID (grid), cell, 0, 1, 1, 1);
     datum->amount_edit = GTK_WIDGET (gnc_amount_edit_new ());
     gtk_grid_attach (GTK_GRID (grid), datum->amount_edit, 1, 1, 1, 1);
 
-    cell = gtk_label_new (description_label);
-    gtk_grid_attach (GTK_GRID (grid), cell, 0, 2, 1, 1);
-    datum->desc = GTK_WIDGET (gtk_entry_new ());
-    gtk_grid_attach (GTK_GRID (grid), datum->desc, 1, 2, 1, 1);
-
     cell = gtk_label_new (memo_label);
-    gtk_grid_attach (GTK_GRID (grid), cell, 0, 3, 1, 1);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 2, 1, 1);
     datum->memo = GTK_WIDGET (gtk_entry_new ());
-    gtk_grid_attach (GTK_GRID (grid), datum->memo, 1, 3, 1, 1);
+    gtk_grid_attach (GTK_GRID (grid), datum->memo, 1, 2, 1, 1);
 
     cell = gtk_label_new (explanation_label);
-    gtk_grid_attach (GTK_GRID (grid), cell, 0, 4, 2, 1);
+    gtk_grid_attach (GTK_GRID (grid), cell, 0, 3, 2, 1);
 
+    g_list_free (commodities);
     return datum;
 }
 
@@ -938,6 +937,7 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     GtkBox *box;
     GtkBuilder *builder;
     GList *types;
+    gnc_commodity *trans_currency;
     StockEditorWindow *data;
     GtkWidget *combo, *label, *button, *progress, *hbox, *gae;
     guint i;
@@ -956,6 +956,7 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     g_return_if_fail (parent);
     g_return_if_fail (GNC_IS_ACCOUNT (account));
 
+    trans_currency = gnc_account_get_currency_or_parent (account);
     data = g_new (StockEditorWindow, 1);
 
     /* Create a new assistant widget with no pages. */
@@ -987,31 +988,35 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     /* Stock Page */
     data->stock_data = add_assistant_stock_page (page[2].widget, account);
 
+    types = g_list_prepend (NULL, GINT_TO_POINTER (ACCT_TYPE_CASH));
+    types = g_list_prepend (types, GINT_TO_POINTER (ACCT_TYPE_ASSET));
+    types = g_list_prepend (types, GINT_TO_POINTER (ACCT_TYPE_BANK));
     data->proceeds_data = add_assistant_account_page
-        (page[3].widget, "Proceeds Account", "Proceeds Amount",
-         "Proceeds Description", "Proceeds Memo",
-         "Source or destination of funds");
+        (page[3].widget, "Proceeds Account", "Proceeds Amount", "Proceeds Memo",
+         "Source or destination of funds", types, trans_currency);
+    g_list_free (types);
 
+    types = g_list_prepend (NULL, GINT_TO_POINTER (ACCT_TYPE_EXPENSE));
     data->fees_cap_data = add_assistant_account_page
         (page[4].widget, "Fees (capitalized) Account", "Fees (capitalized) Amount",
-         "Fees (capitalized) Description", "Fees (capitalized) Memo",
-         "Fees capitalized into stock account; this is "
-         "usually only used on stock sell transactions");
+         "Fees (capitalized) Memo", "Fees capitalized into stock account; this is "
+         "usually only used on stock sell transactions", types, trans_currency);
 
     data->fees_exp_data = add_assistant_account_page
         (page[5].widget, "Fees (expensed) Account", "Fees (expensed) Amount",
-         "Fees (expensed) Description", "Fees (expensed) Memo",
-         "Fees expensed; applies to stock purchases.");
+         "Fees (expensed) Memo", "Fees expensed; applies to stock purchases.",
+         types, trans_currency);
+    g_list_free (types);
 
+    types = g_list_prepend (NULL, GINT_TO_POINTER (ACCT_TYPE_INCOME));
     data->dividend_data = add_assistant_account_page
         (page[6].widget, "Dividend Account", "Dividend Amount",
-         "Dividend Description", "Dividend Memo",
-         "Dividend amount recorded");
+         "Dividend Memo", "Dividend amount recorded", types, trans_currency);
 
     data->capgains_data = add_assistant_account_page
         (page[7].widget, "Capital Gains Account", "Capital Gains Amount",
-         "Capital Gains Description", "Capital Gains Memo",
-         "Capital Gains recorded");
+         "Capital Gains Memo", "Capital Gains recorded", types, trans_currency);
+    g_list_free (types);
 
     /* Create the necessary widgets for the fourth page. The, Attach the progress bar
      * to the GtkAlignment widget for later access.*/
