@@ -945,11 +945,11 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
         { NULL, -1, "Introduction",           GTK_ASSISTANT_PAGE_INTRO,    TRUE},
         { NULL, -1, "Select Action",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Stock Account",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Proceeds Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Capitalized Fees",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Expensed Fees",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Dividend Account",       GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
-        { NULL, -1, "Capital Gains Account",  GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Cash Account",           GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Fees (Capitalized)",     GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Fees (Expensed)",        GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Dividend",               GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
+        { NULL, -1, "Capital Gains",          GTK_ASSISTANT_PAGE_CONTENT,  TRUE},
         { NULL, -1, "Confirmation",           GTK_ASSISTANT_PAGE_CONFIRM,  TRUE},
     };
 
