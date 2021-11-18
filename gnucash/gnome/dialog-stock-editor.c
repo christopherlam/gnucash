@@ -102,7 +102,6 @@ typedef struct StockEditorWindow
     time64 latest_split_date;
     gint component_id;       /* id of component */
 
-    GtkWidget *window;       /* The stock-editor window                 */
     GtkWidget *date_entry;
     GtkWidget *action_combobox;
 
@@ -161,7 +160,6 @@ stockeditor_set_title (GtkWidget *window, Account *account)
 static void
 stock_editor_destroy (StockEditorWindow *data)
 {
-    gtk_widget_destroy (data->window);
     g_free (data);
 }
 
@@ -812,6 +810,9 @@ combo_changed (GtkComboBox *entry, StockEditorWindow *data)
                         ACTION_COL_EXPENSES_MASK, &expenses_mask,
                         -1);
 
+    DEBUG ("proceeds=%d, capgains=%d, expenses=%d, dividend=%d\n",
+            proceeds_mask, capgains_mask, expenses_mask, dividend_mask);
+
     gtk_widget_set_visible (data->stock_data->page, stockamt_mask || stockval_mask);
     gtk_widget_set_visible (data->proceeds_data->page, proceeds_mask);
     gtk_widget_set_visible (data->capgains_data->page, capgains_mask);
@@ -937,7 +938,6 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     GtkBox *box;
     GtkBuilder *builder;
     GList *types;
-    gnc_commodity *trans_currency;
     StockEditorWindow *data;
     GtkWidget *combo, *label, *button, *progress, *hbox, *gae;
     guint i;
@@ -956,13 +956,22 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     g_return_if_fail (parent);
     g_return_if_fail (GNC_IS_ACCOUNT (account));
 
-    trans_currency = gnc_account_get_currency_or_parent (account);
+    if (!xaccAccountIsPriced (account))
+    {
+        PWARN ("Stock Editor for Stock accounts only");
+        return;
+    }
+
     data = g_new (StockEditorWindow, 1);
+    data->trans_currency = gnc_account_get_currency_or_parent (account);
+    data->asset_account = account;
+    data->latest_split_date = account_get_latest_date (account);
 
     /* Create a new assistant widget with no pages. */
     data->assistant = gtk_assistant_new ();
     gtk_widget_set_size_request (data->assistant, 600, 400);
-    gtk_window_set_title (GTK_WINDOW (data->assistant), "Stock Assistant");
+    stockeditor_set_title (data->assistant, account);
+
     /* g_signal_connect (G_OBJECT (assistant), "destroy", */
     /*                   G_CALLBACK (gtk_main_quit), NULL); */
 
@@ -993,29 +1002,29 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     types = g_list_prepend (types, GINT_TO_POINTER (ACCT_TYPE_BANK));
     data->proceeds_data = add_assistant_account_page
         (page[3].widget, "Proceeds Account", "Proceeds Amount", "Proceeds Memo",
-         "Source or destination of funds", types, trans_currency);
+         "Source or destination of funds", types, data->trans_currency);
     g_list_free (types);
 
     types = g_list_prepend (NULL, GINT_TO_POINTER (ACCT_TYPE_EXPENSE));
     data->fees_cap_data = add_assistant_account_page
         (page[4].widget, "Fees (capitalized) Account", "Fees (capitalized) Amount",
          "Fees (capitalized) Memo", "Fees capitalized into stock account; this is "
-         "usually only used on stock sell transactions", types, trans_currency);
+         "usually only used on stock sell transactions", types, data->trans_currency);
 
     data->fees_exp_data = add_assistant_account_page
         (page[5].widget, "Fees (expensed) Account", "Fees (expensed) Amount",
          "Fees (expensed) Memo", "Fees expensed; applies to stock purchases.",
-         types, trans_currency);
+         types, data->trans_currency);
     g_list_free (types);
 
     types = g_list_prepend (NULL, GINT_TO_POINTER (ACCT_TYPE_INCOME));
     data->dividend_data = add_assistant_account_page
         (page[6].widget, "Dividend Account", "Dividend Amount",
-         "Dividend Memo", "Dividend amount recorded", types, trans_currency);
+         "Dividend Memo", "Dividend amount recorded", types, data->trans_currency);
 
     data->capgains_data = add_assistant_account_page
         (page[7].widget, "Capital Gains Account", "Capital Gains Amount",
-         "Capital Gains Memo", "Capital Gains recorded", types, trans_currency);
+         "Capital Gains Memo", "Capital Gains recorded", types, data->trans_currency);
     g_list_free (types);
 
     /* Create the necessary widgets for the fourth page. The, Attach the progress bar
@@ -1058,32 +1067,17 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     g_signal_connect (G_OBJECT (data->assistant), "close",
                       G_CALLBACK (assistant_close), (gpointer) data);
 
-    /* initialize page visibilities */
-    combo_changed (GTK_COMBO_BOX (combo), data);
+    if (parent)
+        gtk_window_set_transient_for (GTK_WINDOW (data->assistant),
+                                      GTK_WINDOW (parent));
+
     gtk_widget_show_all (data->assistant);
+
+    /* initialize page visibilities. note this must be after
+       gtk_widget_show_all which will make all visible. */
+    combo_changed (GTK_COMBO_BOX (combo), data);
+
     return;
-
-    if (!xaccAccountIsPriced (account))
-    {
-        PWARN ("Stock Editor for Stock accounts only");
-        return;
-    }
-
-    data->asset_account = account;
-    data->trans_currency = gnc_account_get_currency_or_parent (account);
-    data->latest_split_date = account_get_latest_date (account);
-
-    /* Create the dialog box */
-    builder = gtk_builder_new();
-
-    gnc_builder_add_from_file (builder, "dialog-stock-editor.glade",
-                               "stock_transaction_editor");
-
-    /* window */
-    data->window = GTK_WIDGET (gtk_builder_get_object
-                               (builder, "stock_transaction_editor"));
-    stockeditor_set_title (data->window, account);
-    gtk_widget_set_name (GTK_WIDGET(data->window), "gnc-id-stock-editor");
 
     data->ok_button = GTK_WIDGET (gtk_builder_get_object (builder, "okbutton1"));
     data->cancel_button = GTK_WIDGET (gtk_builder_get_object (builder, "cancelbutton1"));
@@ -1155,18 +1149,13 @@ void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
     /* Autoconnect signals */
     /* gtk_builder_connect_signals_full (builder, gnc_builder_connect_full_func, */
     /*                                   data->window); */
-    if (parent)
-        gtk_window_set_transient_for (GTK_WINDOW (data->window), GTK_WINDOW (parent));
 
     /* gtk_builder_connect_signals(builder, data); */
     g_object_unref (G_OBJECT (builder));
-
-    gtk_widget_show_all (data->window);
 
     action_changed_cb (NULL, data);
     refresh_all (NULL, data);
 
     gtk_widget_grab_focus (GTK_WIDGET (data->action_combobox));
 
-    gtk_window_present (GTK_WINDOW (data->window));
 }
