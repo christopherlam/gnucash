@@ -80,6 +80,7 @@ gnucash/gnome/dialog-print-check.c
 gnucash/gnome/dialog-progress.c
 gnucash/gnome/dialog-report-column-view.c
 gnucash/gnome/dialog-report-style-sheet.c
+gnucash/gnome/dialog-stock-assistant.c
 gnucash/gnome/dialog-stock-editor.c
 gnucash/gnome/dialog-sx-editor2.c
 gnucash/gnome/dialog-sx-editor.c
