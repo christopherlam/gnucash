@@ -43,7 +43,69 @@
 #include "dialog-stock-editor.h"
 
 static QofLogModule log_module = GNC_MOD_GUI;
+typedef struct StockEditorWindow
+{
+    GtkWidget *assistant;
+    GtkWidget *ok_button;
+    GtkWidget *cancel_button;
+} StockEditorWindow;
 
+
+static void
+assistant_cleanup (StockEditorWindow *data)
+{
+    g_print ("assistant_cleanup\n");
+    g_free (data);
+}
+
+/* If the dialog is cancelled, delete it from memory and then clean up after
+ * the Assistant structure. */
+static void
+assistant_cancel (GtkAssistant *assistant, StockEditorWindow *data)
+{
+    g_print ("assistant_cancel\n");
+    assistant_cleanup (data);
+    gtk_widget_destroy (GTK_WIDGET (assistant));
+}
+
+/* This function is where you would apply the changes and destroy the assistant. */
+static void
+assistant_close (GtkAssistant *assistant, StockEditorWindow *data)
+{
+    g_print ("assistant_close\n");
+    assistant_cleanup (data);
+}
+
+
+static void
+ok_button_cb (GtkWidget *widget, StockEditorWindow *data)
+{
+    g_print ("ok_button\n");
+    assistant_cleanup (data);
+}
+
+static void
+cancel_button_cb (GtkWidget *widget, StockEditorWindow *data)
+{
+    g_print ("cancel_button\n");
+    assistant_cleanup (data);
+}
+
+
+static void
+gnc_stock_assistant_create (StockEditorWindow *data)
+{
+    g_return_if_fail (data);
+    /* Create a new assistant widget with no pages. */
+    data->assistant = gtk_assistant_new ();
+    gtk_widget_set_size_request (data->assistant, 600, 400);
+    g_signal_connect (G_OBJECT (data->assistant), "cancel",
+                      G_CALLBACK (assistant_cancel), (gpointer) data);
+    g_signal_connect (G_OBJECT (data->assistant), "close",
+                      G_CALLBACK (assistant_close), (gpointer) data);
+    /* g_signal_connect (data->ok_button, "clicked", G_CALLBACK (ok_button_cb), data); */
+    /* g_signal_connect (data->cancel_button, "clicked", G_CALLBACK (cancel_button_cb), data); */
+}
 
 /********************************************************************   \
  * stockeditorWindow                                                *
@@ -54,18 +116,17 @@ static QofLogModule log_module = GNC_MOD_GUI;
 \********************************************************************/
 void gnc_ui_stockeditor_dialog (GtkWidget *parent, Account *account)
 {
-    GtkWidget *assistant;
+    StockEditorWindow *data;
 
     g_return_if_fail (parent);
     g_return_if_fail (GNC_IS_ACCOUNT (account) && xaccAccountIsPriced (account));
 
-    /* Create a new assistant widget with no pages. */
-    assistant = gtk_assistant_new ();
-    gtk_widget_set_size_request (assistant, 600, 400);
+    data = g_new (StockEditorWindow, 1);
 
-    gtk_window_set_transient_for (GTK_WINDOW (assistant), GTK_WINDOW (parent));
+    gnc_stock_assistant_create (data);
 
-    gtk_widget_show_all (assistant);
+    gtk_window_set_transient_for (GTK_WINDOW (data->assistant), GTK_WINDOW (parent));
+    gtk_widget_show_all (data->assistant);
 
     return;
 }
