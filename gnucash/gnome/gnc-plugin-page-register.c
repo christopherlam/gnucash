@@ -60,6 +60,7 @@
 #include "dialog-transfer.h"
 #include "dialog-utils.h"
 #include "assistant-stock-split.h"
+#include "assistant-stock-transaction.h"
 #include "gnc-component-manager.h"
 #include "gnc-date.h"
 #include "gnc-date-edit.h"
@@ -4617,7 +4618,7 @@ gnc_plugin_page_register_cmd_stock_split (GtkAction* action,
 
     account = gnc_plugin_page_register_get_account (page);
     window = gnc_window_get_gtk_window (GNC_WINDOW (GNC_PLUGIN_PAGE (page)->window));
-    gnc_stock_split_dialog (GTK_WIDGET (window), account);
+    gnc_stock_transaction_dialog (GTK_WIDGET (window), account);
     LEAVE (" ");
 }
 
