@@ -454,16 +454,9 @@ static void refresh_page_stock_amount (GtkWidget *widget, gpointer user_data)
 
         bal_str = xaccPrintAmount (bal, pinfo);
         gtk_label_set_text (GTK_LABEL(info->next_amount), bal_str);
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
-                                         info->stock_amount_page,
-                                         !gnc_numeric_zero_p (stock_delta));
     }
     else
-    {
         gtk_label_set_text (GTK_LABEL(info->next_amount), nullptr);
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
-                                         info->stock_amount_page, false);
-    }
 }
 
 
@@ -483,16 +476,12 @@ static void refresh_page_stock_value (GtkWidget *widget, gpointer user_data)
         return;
 
     if (gnc_numeric_zero_p (value))
-    {
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->stock_value_page, false);
         return;
-    }
 
     auto price = gnc_numeric_div (value, amount, GNC_DENOM_AUTO, GNC_HOW_RND_ROUND);
     auto pinfo = gnc_commodity_print_info (info->currency, true);
     auto price_str = xaccPrintAmount (price, pinfo);
     gtk_label_set_text (GTK_LABEL (info->price_amount), price_str);
-    gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->stock_value_page, true);
 }
 
 static void refresh_page_cash (GtkWidget *widget, gpointer user_data)
@@ -513,8 +502,50 @@ static void refresh_page_fees (GtkWidget *widget, gpointer user_data)
 static void refresh_page_capgains (GtkWidget *widget, gpointer user_data)
 {
     StockTransactionInfo *info = (StockTransactionInfo *)user_data;
-    /// check capgains acct exists.
     return;
+}
+
+static void
+add_line (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
+          uint splitfield, Account *acct, GtkWidget *memo, GtkWidget *gae,
+          gnc_commodity *comm, bool& fail)
+{
+    if (splitfield == DISABLED)
+        return;
+
+    const gchar* amtstr;
+    gnc_numeric amount;
+
+    if (gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (gae), &amount, true, nullptr))
+    {
+        amtstr = "missing";
+        fail = true;
+    }
+    else
+    {
+        if (splitfield == ENABLED_DEBIT)
+            debit = gnc_numeric_add_fixed (debit, amount);
+        else
+        {
+            amount = gnc_numeric_neg (amount);
+            credit = gnc_numeric_add_fixed (credit, amount);
+        }
+        amtstr = xaccPrintAmount (amount, gnc_commodity_print_info (comm, true));
+    }
+
+    auto memostr = gtk_entry_get_text (GTK_ENTRY (memo));
+    auto acctstr = acct ? xaccAccountGetName (acct) : "missing";
+
+    if (!acct) fail = true;
+
+    GtkTreeIter iter;
+    gtk_list_store_append (*list, &iter);
+    gtk_list_store_set (*list, &iter,
+                        SPLIT_COL_ACCOUNT, acctstr,
+                        SPLIT_COL_MEMO, memostr,
+                        SPLIT_COL_DEBIT, (splitfield == ENABLED_DEBIT) ? amtstr : "",
+                        SPLIT_COL_CREDIT, (splitfield == ENABLED_CREDIT) ? amtstr : "",
+                        -1);
 }
 
 static void refresh_page_finish (StockTransactionInfo *info)
@@ -522,6 +553,14 @@ static void refresh_page_finish (StockTransactionInfo *info)
     auto view = GTK_TREE_VIEW (info->split_view);
     auto list = GTK_LIST_STORE (gtk_tree_view_get_model(view));
     gtk_list_store_clear (list);
+
+    gnc_numeric debit = gnc_numeric_zero ();
+    gnc_numeric credit = gnc_numeric_zero ();
+    bool fail = false;
+
+    add_line (&list, debit, credit, info->txn_type.stock_amount, info->acct, info->stock_memo_edit, info->stock_value_edit, info->currency, fail);
+
+    add_line (&list, debit, credit, info->txn_type.cash_amount, gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->cash_account)), info->cash_memo_edit, info->cash_amount, info->currency, fail);
 
     for (gint i = 0; i < 5; i++)
     {
@@ -742,7 +781,7 @@ static GtkWidget * create_gae (GtkBuilder *builder, gint row, gnc_commodity *com
     // shares amount
     auto table = get_widget (builder, table_ID);
     auto label = get_widget (builder, label_ID);
-    auto info = gnc_default_price_print_info (comm);
+    auto info = gnc_commodity_print_info (comm, true);
     auto gae = gnc_amount_edit_new ();
     gnc_amount_edit_set_evaluate_on_enter (GNC_AMOUNT_EDIT (gae), TRUE);
     gnc_amount_edit_set_print_info (GNC_AMOUNT_EDIT (gae), info);
