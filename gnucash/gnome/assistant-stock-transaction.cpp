@@ -52,15 +52,19 @@ void stock_assistant_cancel  (GtkAssistant *gtkassistant, gpointer user_data);
 
 #define ASSISTANT_STOCK_TRANSACTION_CM_CLASS "assistant-stock-transaction"
 
-enum transaction_cols
+enum assistant_pages
 {
-    TRANSACTION_COL_ACCOUNT = 0,
-    TRANSACTION_COL_FULLNAME,
-    TRANSACTION_COL_MNEMONIC,
-    TRANSACTION_COL_SHARES,
-    NUM_TRANSACTION_COLS
+    PAGE_INTRO = 0,
+    PAGE_TRANSACTION_TYPE,
+    PAGE_TRANSATION_DETAILS,
+    PAGE_STOCK_AMOUNT,
+    PAGE_STOCK_VALUE,
+    PAGE_CASH,
+    PAGE_FEES,
+    PAGE_DIVIDEND,
+    PAGE_CAPGAINS,
+    PAGE_FINISH
 };
-
 
 enum split_cols
 {
@@ -77,32 +81,37 @@ typedef enum
 {
     DISABLED = 0,
     ENABLED_DEBIT,
-    ENABLED_CREDIT
+    ENABLED_CREDIT,
+    ALLOW_ZERO = 4,
+    ALLOW_NEGATIVE = 8
 } FieldMask;
 
 typedef struct
 {
     uint stock_amount;
     uint stock_value;
-    uint cash_amount;
-    uint fees_amount;
+    uint cash_value;
+    uint fees_value;
     bool fees_capitalize;
-    uint divi_amount;
-    bool capg_amount;
+    uint dividend_value;
+    uint capgains_value;
     std::string friendly_name;
     std::string explanation;
 } TxnTypeInfo;
 
-static const std::vector<TxnTypeInfo> starting_types
+using StringVec = std::vector<std::string>;
+using TxnTypeVec = std::vector<TxnTypeInfo>;
+
+static const TxnTypeVec starting_types
 {
     {
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_CREDIT,         // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Open buy",
         "Initial stock purchase"
     },
@@ -110,25 +119,25 @@ static const std::vector<TxnTypeInfo> starting_types
         ENABLED_CREDIT,         // stock_amt
         ENABLED_CREDIT,         // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Open short",
         "Initial stock short-sale"
     }
 };
 
-static const std::vector<TxnTypeInfo> open_types
+static const TxnTypeVec open_types
 {
     {
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_CREDIT,         // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Buy",
         "Buying stock."
     },
@@ -136,10 +145,10 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_CREDIT,         // stock_amt
         ENABLED_CREDIT,         // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        DISABLED,               // divi_amt
-        true,                   // capg_amt
+        DISABLED,               // dividend_amt
+        ENABLED_CREDIT | ALLOW_ZERO | ALLOW_NEGATIVE, // capgains_amt
         "Sell",
         "Selling stock, and record capital gains/loss"
     },
@@ -147,10 +156,10 @@ static const std::vector<TxnTypeInfo> open_types
         DISABLED,               // stock_amt
         DISABLED,               // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_CREDIT,         // divi_amt
-        false,                  // capg_amt
+        ENABLED_CREDIT,         // dividend_amt
+        DISABLED,               // capg_amt
         "Dividend",
         "Company issues dividends to holder"
     },
@@ -158,10 +167,10 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_CREDIT,         // divi_amt
-        false,                  // capg_amt
+        ENABLED_CREDIT,         // dividend_amt
+        DISABLED,               // capg_amt
         "Dividend reinvestment (w/ remainder)",
         "Company issues dividend which is reinvested. Some dividends are paid to holder"
     },
@@ -169,10 +178,10 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         DISABLED,               // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_CREDIT,         // divi_amt
-        false,                  // capg_amt
+        ENABLED_CREDIT,         // dividend_amt
+        DISABLED,               // capg_amt
         "Dividend reinvestment (w/o remainder)",
         "Company issues dividend which is wholly reinvested."
     },
@@ -180,10 +189,10 @@ static const std::vector<TxnTypeInfo> open_types
         DISABLED,               // stock_amt
         ENABLED_CREDIT,         // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Return of Capital",
         "Stock returns capital to holder"
     },
@@ -191,10 +200,10 @@ static const std::vector<TxnTypeInfo> open_types
         DISABLED,               // stock_amt
         ENABLED_DEBIT,          // stock_val
         DISABLED,               // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_CREDIT,         // divi_amt
-        false,                  // capg_amt
+        ENABLED_CREDIT,         // dividend_amt
+        DISABLED,               // capg_amt
         "Notional distribution",
         "Stock returns a notional distribution"
     },
@@ -202,10 +211,10 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_DEBIT,          // stock_amt
         DISABLED,               // stock_val
         DISABLED,               // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Stock split",
         "Stock price is fractionally reduced"
     },
@@ -213,10 +222,10 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_CREDIT,         // stock_amt
         DISABLED,               // stock_val
         DISABLED,               // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        DISABLED,               // capg_amt
         "Reverse split",
         "Stocks price is fractionally increased."
     },
@@ -224,24 +233,24 @@ static const std::vector<TxnTypeInfo> open_types
         ENABLED_CREDIT,         // stock_amt
         ENABLED_CREDIT,         // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        DISABLED,               // divi_amt
-        false,                  // capg_amt
+        DISABLED,               // dividend_amt
+        ENABLED_CREDIT | ALLOW_ZERO | ALLOW_NEGATIVE, // capgains_amt
         "Reverse split w/ cash in lieu for fractionals",
         "Stocks price is fractionally increased. Fractional remaining stock is returned as cash."
     },
 };
 
-static const std::vector<TxnTypeInfo> short_types
+static const TxnTypeVec short_types
 {
     {
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Short sell",
         ""
@@ -250,9 +259,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Cover buy",
         ""
@@ -261,9 +270,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Compensatory Dividend",
         ""
@@ -272,9 +281,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Dividend reinvestment (w/ remainder)",
         ""
@@ -283,9 +292,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Dividend reinvestment (w/o remainder)",
         ""
@@ -294,9 +303,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Compensatory Return of Capital",
         ""
@@ -305,9 +314,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Compensatory Notional distribution",
         ""
@@ -316,9 +325,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Stock split",
         ""
@@ -327,9 +336,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         true,                   // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Reverse split",
         ""
@@ -338,9 +347,9 @@ static const std::vector<TxnTypeInfo> short_types
         ENABLED_DEBIT,          // stock_amt
         ENABLED_DEBIT,          // stock_val
         ENABLED_DEBIT,          // cash_amt
-        ENABLED_DEBIT,          // fees_amt
+        ENABLED_DEBIT | ALLOW_ZERO,          // fees_amt
         false,                  // fees_capitalize
-        ENABLED_DEBIT,          // divi_amt
+        ENABLED_DEBIT,          // dividend_amt
         ENABLED_DEBIT,          // capg_amt
         "Reverse split w/ cash in lieu for fractionals",
         ""
@@ -352,7 +361,7 @@ typedef struct
     GtkWidget * window;
     GtkWidget * assistant;
 
-    std::vector<TxnTypeInfo> txn_types;
+    TxnTypeVec txn_types;
     Account   * acct;
     gnc_commodity * currency;
 
@@ -377,40 +386,43 @@ typedef struct
     // stock value page
     GtkWidget * stock_value_page;
     GtkWidget * stock_value_edit;
-    GtkWidget * price_amount;
+    GtkWidget * price_value;
     GtkWidget * stock_memo_edit;
 
     // cash page
     GtkWidget * cash_page;
     GtkWidget * cash_account;
     GtkWidget * cash_memo_edit;
-    GtkWidget * cash_amount;
+    GtkWidget * cash_value;
 
     // fees page
     GtkWidget * fees_page;
     GtkWidget * capitalize_fees_checkbox;
     GtkWidget * fees_account;
     GtkWidget * fees_memo_edit;
-    GtkWidget * fees_amount;
+    GtkWidget * fees_value;
+
+    // dividend page
+    GtkWidget * dividend_page;
+    GtkWidget * dividend_account;
+    GtkWidget * dividend_memo_edit;
+    GtkWidget * dividend_value;
 
     // capgains page
     GtkWidget * capgains_page;
     GtkWidget * capgains_account;
     GtkWidget * capgains_memo_edit;
-    GtkWidget * capgains_amount;
+    GtkWidget * capgains_value;
 
     // finish page
     GtkWidget * finish_page;
-    GtkWidget * split_view;
+    GtkWidget * finish_split_view;
+    GtkWidget * finish_summary;
 } StockTransactionInfo;
 
 
-/** declarations *******************************************************/
-void     stock_assistant_window_destroy_cb (GtkWidget *object, gpointer user_data);
-void     stock_assistant_details_prepare   (GtkAssistant *assistant, gpointer user_data);
-
 /******* implementations ***********************************************/
-void
+static void
 stock_assistant_window_destroy_cb (GtkWidget *object, gpointer user_data)
 {
     StockTransactionInfo *info = (StockTransactionInfo *)user_data;
@@ -454,52 +466,33 @@ static void refresh_page_stock_amount (GtkWidget *widget, gpointer user_data)
 
         bal_str = xaccPrintAmount (bal, pinfo);
         gtk_label_set_text (GTK_LABEL(info->next_amount), bal_str);
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
-                                         info->stock_amount_page,
-                                         !gnc_numeric_zero_p (stock_delta));
     }
     else
-    {
         gtk_label_set_text (GTK_LABEL(info->next_amount), nullptr);
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
-                                         info->stock_amount_page, false);
-    }
 }
 
 
 static void refresh_page_stock_value (GtkWidget *widget, gpointer user_data)
 {
     StockTransactionInfo *info = (StockTransactionInfo *)user_data;
+    gnc_numeric amount, value;
 
     if (info->txn_type.stock_amount == DISABLED ||
-        info->txn_type.stock_value == DISABLED)
+        info->txn_type.stock_value == DISABLED ||
+        gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (info->stock_amount_edit), &amount, true, nullptr) ||
+        gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (info->stock_value_edit),  &value,  true, nullptr) || 
+        gnc_numeric_zero_p (value))
         return;
-
-    gnc_numeric amount, value;
-    if (gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (info->stock_amount_edit),
-                                       &amount, true, nullptr) ||
-        gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (info->stock_value_edit),
-                                       &value, true, nullptr))
-        return;
-
-    if (gnc_numeric_zero_p (value))
-    {
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->stock_value_page, false);
-        return;
-    }
 
     auto price = gnc_numeric_div (value, amount, GNC_DENOM_AUTO, GNC_HOW_RND_ROUND);
     auto pinfo = gnc_commodity_print_info (info->currency, true);
     auto price_str = xaccPrintAmount (price, pinfo);
-    gtk_label_set_text (GTK_LABEL (info->price_amount), price_str);
-    gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->stock_value_page, true);
+    gtk_label_set_text (GTK_LABEL (info->price_value), price_str);
 }
 
 static void refresh_page_cash (GtkWidget *widget, gpointer user_data)
 {
-    StockTransactionInfo *info = (StockTransactionInfo *)user_data;
-    g_assert (info->txn_type.cash_amount != DISABLED);
-    // check amount and account exist
+    return;
 }
 
 static void refresh_page_fees (GtkWidget *widget, gpointer user_data)
@@ -510,29 +503,144 @@ static void refresh_page_fees (GtkWidget *widget, gpointer user_data)
     gtk_widget_set_sensitive (info->fees_account, !capitalize_fees);
 }
 
+static void refresh_page_dividend (GtkWidget *widget, gpointer user_data)
+{
+    return;
+}
+
 static void refresh_page_capgains (GtkWidget *widget, gpointer user_data)
 {
-    StockTransactionInfo *info = (StockTransactionInfo *)user_data;
-    /// check capgains acct exists.
     return;
+}
+
+static void add_error (StringVec& errors, const std::string& format_str,
+                       const std::string& arg)
+{
+    gchar *buf = g_strdup_printf (format_str.c_str (), arg.c_str());
+    errors.emplace_back (std::string {buf});
+    g_free (buf);
+}
+
+static void
+check_page (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
+            uint splitfield, Account *acct, GtkWidget *memo, GtkWidget *gae,
+            gnc_commodity *comm, bool ignore_account,
+            std::string page, StringVec& errors)
+{
+    if (splitfield == DISABLED)
+        return;
+
+    const gchar* amtstr;
+    gnc_numeric amount;
+    bool debit_side = (splitfield & ENABLED_DEBIT);
+
+    if (gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (gae), &amount, true, nullptr))
+    {
+        add_error (errors, "Amount for %s is missing", page);
+        amtstr = "(missing)";
+    }
+    else
+    {
+        if (!(splitfield | ALLOW_NEGATIVE))
+        {
+            if ((splitfield | ALLOW_ZERO) && gnc_numeric_negative_p (amount))
+                add_error (errors, "Amount for %s must not be negative.", page);
+            else if (!(splitfield | ALLOW_ZERO) && !gnc_numeric_positive_p (amount))
+                add_error (errors, "Amount for %s must be positive.", page);
+        }
+        if (gnc_numeric_negative_p (amount))
+            debit_side = !debit_side;
+        if (splitfield & ENABLED_DEBIT)
+            debit = gnc_numeric_add_fixed (debit, amount);
+        else
+            credit = gnc_numeric_add_fixed (credit, amount);
+        amtstr = xaccPrintAmount (amount, gnc_commodity_print_info (comm, true));
+    }
+
+    auto memostr = gtk_entry_get_text (GTK_ENTRY (memo));
+    const gchar *acctstr;
+
+    if (ignore_account)
+        acctstr = "";
+    else if (acct)
+        acctstr = xaccAccountGetName (acct);
+    else
+    {
+        add_error (errors, "Account for %s is missing", page);
+        acctstr = "(missing)";
+    }
+
+    GtkTreeIter iter;
+    gtk_list_store_append (*list, &iter);
+    gtk_list_store_set (*list, &iter,
+                        SPLIT_COL_ACCOUNT, acctstr,
+                        SPLIT_COL_MEMO, memostr,
+                        SPLIT_COL_DEBIT, debit_side ? amtstr : "",
+                        SPLIT_COL_CREDIT, !debit_side ? amtstr : "",
+                        -1);
+}
+
+static std::string join(const StringVec& v, char c)
+{
+    std::string s;
+    for (StringVec::const_iterator p = v.begin(); p != v.end(); ++p)
+    {
+        s += *p;
+        if (p != v.end() - 1)
+            s += c;
+    }
+    return s;
 }
 
 static void refresh_page_finish (StockTransactionInfo *info)
 {
-    auto view = GTK_TREE_VIEW (info->split_view);
+    auto view = GTK_TREE_VIEW (info->finish_split_view);
     auto list = GTK_LIST_STORE (gtk_tree_view_get_model(view));
     gtk_list_store_clear (list);
 
-    for (gint i = 0; i < 5; i++)
+    gnc_numeric debit = gnc_numeric_zero ();
+    gnc_numeric credit = gnc_numeric_zero ();
+    StringVec errors;
+
+    check_page (&list, debit, credit, info->txn_type.stock_value, info->acct,
+                info->stock_memo_edit, info->stock_value_edit, info->currency,
+                false, "stock", errors);
+
+    check_page (&list, debit, credit, info->txn_type.cash_value,
+                gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->cash_account)),
+                info->cash_memo_edit, info->cash_value, info->currency,
+                false, "cash", errors);
+
+    check_page (&list, debit, credit, info->txn_type.fees_value,
+                gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->fees_account)),
+                info->fees_memo_edit, info->fees_value, info->currency,
+                gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON
+                                              (info->capitalize_fees_checkbox)),
+                "fees", errors);
+
+    check_page (&list, debit, credit, info->txn_type.dividend_value,
+                gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->dividend_account)),
+                info->dividend_memo_edit, info->dividend_value, info->currency,
+                false, "dividend", errors);
+
+    // must handle capgains can be any sign.
+    check_page (&list, debit, credit, info->txn_type.capgains_value,
+                gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->capgains_account)),
+                info->capgains_memo_edit, info->capgains_value, info->currency,
+                false, "capital gains", errors);
+
+    if (!gnc_numeric_equal (debit, credit))
+        errors.emplace_back ("Debits and credits are not balanced");
+
+    if (errors.empty())
     {
-        GtkTreeIter iter;
-        gtk_list_store_append (list, &iter);
-        gtk_list_store_set (list, &iter,
-                            SPLIT_COL_ACCOUNT, "acc",
-                            SPLIT_COL_MEMO, "memo",
-                            SPLIT_COL_DEBIT, "$10.00",
-                            SPLIT_COL_CREDIT, "$20.00",
-                            -1);
+        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->finish_page, true);
+        gtk_label_set_text (GTK_LABEL (info->finish_summary), "No errors found. Click Apply to create transaction.");
+    }
+    else
+    {
+        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->finish_page, false);
+        gtk_label_set_text (GTK_LABEL (info->finish_summary), join (errors, '\n').c_str());
     }
 }
 
@@ -546,11 +654,11 @@ void stock_assistant_prepare (GtkAssistant  *assistant, GtkWidget *page,
 
     switch (currentpage)
     {
-    case 1:
+    case PAGE_TRANSACTION_TYPE:
         refresh_page_transaction_type (info->transaction_type_combo, info);
         gtk_widget_grab_focus (info->transaction_type_combo);
         break;
-    case 3:
+    case PAGE_STOCK_AMOUNT:
         info->balance_at_date = xaccAccountGetBalanceAsOfDate
             (info->acct, gnc_date_edit_get_date_end (GNC_DATE_EDIT (info->date_edit)));
         refresh_page_stock_amount (info->stock_amount_edit, info);
@@ -558,22 +666,25 @@ void stock_assistant_prepare (GtkAssistant  *assistant, GtkWidget *page,
         gtk_widget_grab_focus (gnc_amount_edit_gtk_entry
                                (GNC_AMOUNT_EDIT (info->stock_amount_edit)));
         break;
-    case 4:
+    case PAGE_STOCK_VALUE:
         refresh_page_stock_value (info->stock_value_edit, info);
         // fixme: ditto
         gtk_widget_grab_focus (gnc_amount_edit_gtk_entry
                                (GNC_AMOUNT_EDIT (info->stock_value_edit)));
         break;
-    case 5:
-        refresh_page_cash (info->cash_amount, info);
+    case PAGE_CASH:
+        refresh_page_cash (info->cash_value, info);
         break;
-    case 6:
-        refresh_page_fees (info->fees_amount, info);
+    case PAGE_FEES:
+        refresh_page_fees (info->fees_value, info);
         break;
-    case 7:
-        refresh_page_capgains (info->capgains_amount, info);
+    case PAGE_DIVIDEND:
+        refresh_page_dividend (info->fees_value, info);
         break;
-    case 8:
+    case PAGE_CAPGAINS:
+        refresh_page_capgains (info->capgains_value, info);
+        break;
+    case PAGE_FINISH:
         refresh_page_finish (info);
         break;
     }
@@ -585,12 +696,20 @@ forward_page_func (gint current_page, gpointer user_data)
     auto info = (StockTransactionInfo *)user_data;
     auto txn_type = info->txn_type;
 
-    if (current_page == 2 && txn_type.stock_amount == DISABLED) current_page++;
-    if (current_page == 3 && txn_type.stock_value == DISABLED)  current_page++;
-    if (current_page == 4 && txn_type.cash_amount == DISABLED)  current_page++;
-    if (current_page == 5 && txn_type.fees_amount == DISABLED)  current_page++;
-    if (current_page == 6 && txn_type.capg_amount == false)     current_page++;
     current_page++;
+    if (txn_type.stock_amount == DISABLED && current_page == PAGE_STOCK_AMOUNT)
+        current_page++;
+    if (txn_type.stock_value == DISABLED && current_page == PAGE_STOCK_VALUE)
+        current_page++;
+    if (txn_type.cash_value == DISABLED && current_page == PAGE_CASH)
+        current_page++;
+    if (txn_type.fees_value == DISABLED && current_page == PAGE_FEES)
+        current_page++;
+    if (txn_type.dividend_value == DISABLED && current_page == PAGE_DIVIDEND)
+        current_page++;
+    if (txn_type.capgains_value == false && current_page == PAGE_CAPGAINS)
+        current_page++;
+
     return current_page;
 }
 
@@ -650,7 +769,7 @@ stock_assistant_finish (GtkAssistant *assistant, gpointer user_data)
             gnc_error_dialog (GTK_WINDOW (info->window), "%s", _("Error adding price."));
     }
 
-    amount = gnc_amount_edit_get_amount (GNC_AMOUNT_EDIT (info->cash_amount));
+    amount = gnc_amount_edit_get_amount (GNC_AMOUNT_EDIT (info->cash_value));
     if (gnc_numeric_positive_p (amount))
     {
         const char *memo = gtk_entry_get_text (GTK_ENTRY (info->cash_memo_edit));
@@ -700,19 +819,13 @@ stock_assistant_cancel (GtkAssistant *assistant, gpointer user_data)
     gnc_close_gui_component_by_data (ASSISTANT_STOCK_TRANSACTION_CM_CLASS, info);
 }
 
-static void fill_transaction_types (GtkWidget *widget, StockTransactionInfo *info)
-{
-    GtkComboBoxText *combo = GTK_COMBO_BOX_TEXT (widget);
-    gtk_combo_box_text_remove_all (combo);
-    for (auto& it : info->txn_types)
-        gtk_combo_box_text_append_text (combo, it.friendly_name.c_str() );
-    gtk_combo_box_set_active (GTK_COMBO_BOX (combo), 0);
-}
-
 static GtkWidget * get_widget (GtkBuilder *builder, const gchar * ID)
 {
     g_return_val_if_fail (builder && ID, nullptr);
-    return GTK_WIDGET (gtk_builder_get_object (builder, ID));
+    auto obj = gtk_builder_get_object (builder, ID);
+    if (!obj)
+        g_warning ("get_widget ID '%s' not found. it may be a typo?", ID);
+    return GTK_WIDGET (obj);
 }
 
 static GtkWidget * create_gas (GtkBuilder *builder, gint row,
@@ -742,7 +855,7 @@ static GtkWidget * create_gae (GtkBuilder *builder, gint row, gnc_commodity *com
     // shares amount
     auto table = get_widget (builder, table_ID);
     auto label = get_widget (builder, label_ID);
-    auto info = gnc_default_price_print_info (comm);
+    auto info = gnc_commodity_print_info (comm, true);
     auto gae = gnc_amount_edit_new ();
     gnc_amount_edit_set_evaluate_on_enter (GNC_AMOUNT_EDIT (gae), TRUE);
     gnc_amount_edit_set_print_info (GNC_AMOUNT_EDIT (gae), info);
@@ -771,20 +884,23 @@ stock_assistant_create (StockTransactionInfo *info)
     info->currency = gnc_account_get_currency_or_parent (info->acct);
 
     /* Transaction Page Widgets */
-    auto table = get_widget (builder, "transaction_type_table");
     info->transaction_type_page = get_widget (builder, "transaction_type_page");
     info->transaction_type_combo = get_widget (builder, "transaction_type_page_combobox");
     info->transaction_type_explanation = get_widget (builder, "transaction_type_page_explanation");
-    fill_transaction_types (info->transaction_type_combo, info);
+    // initialize transaction types.
+    gtk_combo_box_text_remove_all (GTK_COMBO_BOX_TEXT (info->transaction_type_combo));
+    for (auto& it : info->txn_types)
+        gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (info->transaction_type_combo),
+                                        it.friendly_name.c_str() );
+    gtk_combo_box_set_active (GTK_COMBO_BOX (info->transaction_type_combo), 0);
     g_signal_connect (info->transaction_type_combo, "changed",
                       G_CALLBACK (refresh_page_transaction_type), info);
 
     /* Transaction Details Widgets */
-    table = get_widget (builder, "transaction_details_table");
     info->transaction_details_page = get_widget (builder, "transaction_details_page");
     auto date = gnc_date_edit_new (gnc_time (NULL), FALSE, FALSE);
     auto label = get_widget (builder, "transaction_date_label");
-    gtk_grid_attach (GTK_GRID(table), date, 1, 0, 1, 1);
+    gtk_grid_attach (GTK_GRID(get_widget (builder, "transaction_details_table")), date, 1, 0, 1, 1);
     gtk_widget_show (date);
     info->date_edit = date;
     info->transaction_description_entry = get_widget (builder, "transaction_description_entry");
@@ -801,40 +917,46 @@ stock_assistant_create (StockTransactionInfo *info)
     /* Stock Value Page Widgets */
     info->stock_value_page = get_widget (builder, "stock_value_page");
     info->stock_value_edit = create_gae (builder, 0, info->currency, "stock_value_table", "stock_value_label");
-    info->price_amount = get_widget (builder, "stock_price_amount");
-    info->stock_memo_edit = get_widget (builder, "stock_memo_edit");
+    info->price_value = get_widget (builder, "stock_price_amount");
+    info->stock_memo_edit = get_widget (builder, "stock_memo_entry");
     g_signal_connect (info->stock_value_edit, "changed",
                       G_CALLBACK (refresh_page_stock_value), info);
 
     /* Cash Page Widgets */
-    table = get_widget (builder, "cash_table");
     info->cash_page = get_widget (builder, "cash_details_page");
     info->cash_account = create_gas (builder, 0, { ACCT_TYPE_ASSET, ACCT_TYPE_BANK }, info->currency,  "cash_table", "cash_account_label");
-    info->cash_amount = create_gae (builder, 1, info->currency, "cash_table", "cash_label");
+    info->cash_value = create_gae (builder, 1, info->currency, "cash_table", "cash_label");
     info->cash_memo_edit = get_widget (builder, "cash_memo_entry");
 
     /* Fees Page Widgets */
-    table = get_widget (builder, "fees_table");
     info->fees_page = get_widget (builder, "fees_details_page");
     auto capitalize_check = get_widget (builder, "capitalize_fees_checkbutton");
     info->capitalize_fees_checkbox = capitalize_check;
     info->fees_account = create_gas (builder, 1, { ACCT_TYPE_EXPENSE }, info->currency, "fees_table", "fees_account_label");
-    info->fees_amount = create_gae (builder, 2, info->currency, "fees_table", "fees_label");
-    info->fees_memo_edit = get_widget (builder, "cash_memo_entry");
+    info->fees_value = create_gae (builder, 2, info->currency, "fees_table", "fees_label");
+    info->fees_memo_edit = get_widget (builder, "fees_memo_entry");
     g_signal_connect (capitalize_check, "toggled",
                       G_CALLBACK (refresh_page_fees), info);
 
+    /* Divi Page Widgets */
+    info->dividend_page = get_widget (builder, "dividend_details_page");
+    info->dividend_account = create_gas (builder, 1, { ACCT_TYPE_EXPENSE }, info->currency, "dividend_table", "dividend_account_label");
+    info->dividend_value = create_gae (builder, 2, info->currency, "dividend_table", "dividend_label");
+    info->dividend_memo_edit = get_widget (builder, "dividend_memo_entry");
+    g_signal_connect (capitalize_check, "toggled",
+                      G_CALLBACK (refresh_page_dividend), info);
+
     /* Capgains Page Widgets */
-    table = get_widget (builder, "capgains_table");
     info->capgains_page = get_widget (builder, "capgains_details_page");
     info->capgains_account = create_gas (builder, 0, { ACCT_TYPE_INCOME }, info->currency, "capgains_table", "capgains_account_label");
-    info->capgains_amount = create_gae (builder, 1, info->currency, "capgains_table", "capgains_label");
+    info->capgains_value = create_gae (builder, 1, info->currency, "capgains_table", "capgains_label");
     info->capgains_memo_edit = get_widget (builder, "capgains_memo_entry");
 
     /* Finish Page Widgets */
     info->finish_page = get_widget (builder, "finish_page");
-    info->split_view = get_widget (builder, "transaction_view");
-    auto view = GTK_TREE_VIEW (info->split_view);
+    info->finish_split_view = get_widget (builder, "transaction_view");
+    info->finish_summary = get_widget (builder, "finish_summary");
+    auto view = GTK_TREE_VIEW (info->finish_split_view);
     gtk_tree_view_set_grid_lines (GTK_TREE_VIEW(view), gnc_tree_view_get_grid_lines_pref ());
     auto store = gtk_list_store_new (NUM_SPLIT_COLS, G_TYPE_STRING, G_TYPE_STRING,
                                      G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);

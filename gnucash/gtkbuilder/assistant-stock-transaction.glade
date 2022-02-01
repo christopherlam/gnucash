@@ -501,7 +501,7 @@
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="halign">end</property>
-                <property name="label" translatable="yes">Proceeds Account</property>
+                <property name="label" translatable="yes">Cash Account</property>
                 <property name="use-underline">True</property>
                 <property name="justify">center</property>
                 <property name="mnemonic-widget">cash_memo_entry</property>
@@ -651,6 +651,119 @@
       </object>
       <packing>
         <property name="title" translatable="yes" comments="Broker Fees">Fees</property>
+        <property name="complete">True</property>
+        <property name="has-padding">False</property>
+      </packing>
+    </child>
+    <child>
+      <object class="GtkBox" id="dividend_details_page">
+        <property name="visible">True</property>
+        <property name="can-focus">False</property>
+        <property name="border-width">6</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <child>
+          <object class="GtkLabel" id="stock_dividend_title">
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="margin-bottom">6</property>
+            <property name="label" translatable="yes">In this page, input any dividend income received in this transaction.</property>
+            <property name="wrap">True</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">False</property>
+            <property name="position">0</property>
+          </packing>
+        </child>
+        <child>
+          <!-- n-columns=2 n-rows=3 -->
+          <object class="GtkGrid" id="dividend_table">
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="row-spacing">3</property>
+            <property name="column-spacing">6</property>
+            <child>
+              <object class="GtkLabel" id="dividend_label">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="halign">end</property>
+                <property name="label" translatable="yes">_Amount</property>
+                <property name="use-underline">True</property>
+                <property name="justify">center</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel" id="dividend_memo_label">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="halign">end</property>
+                <property name="label" translatable="yes">_Memo</property>
+                <property name="use-underline">True</property>
+                <property name="justify">center</property>
+                <property name="mnemonic-widget">dividend_memo_entry</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="dividend_memo_entry">
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="hexpand">True</property>
+                <property name="invisible-char">●</property>
+                <property name="text" translatable="yes">Dividend</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkBox" id="dividend_amount_box">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="hexpand">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel" id="dividend_account_label">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="halign">end</property>
+                <property name="label" translatable="yes">Dividend Account</property>
+                <property name="use-underline">True</property>
+                <property name="justify">center</property>
+                <property name="mnemonic-widget">dividend_memo_entry</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <placeholder/>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">False</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+      </object>
+      <packing>
+        <property name="title" translatable="yes" comments="Broker Fees">Dividend</property>
         <property name="complete">True</property>
         <property name="has-padding">False</property>
       </packing>
@@ -810,6 +923,18 @@
             <property name="position">1</property>
           </packing>
         </child>
+        <child>
+          <object class="GtkLabel" id="finish_summary">
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">label</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">2</property>
+          </packing>
+        </child>
       </object>
       <packing>
         <property name="page-type">confirm</property>
@@ -821,6 +946,9 @@
       <object class="GtkBox">
         <property name="can-focus">False</property>
       </object>
+      <packing>
+        <property name="has-padding">False</property>
+      </packing>
     </child>
   </object>
 </interface>
