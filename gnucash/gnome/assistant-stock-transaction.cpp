@@ -401,7 +401,8 @@ typedef struct
 
     // finish page
     GtkWidget * finish_page;
-    GtkWidget * split_view;
+    GtkWidget * finish_split_view;
+    GtkWidget * finish_summary;
 } StockTransactionInfo;
 
 
@@ -508,7 +509,7 @@ static void refresh_page_capgains (GtkWidget *widget, gpointer user_data)
 static void
 add_line (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
           uint splitfield, Account *acct, GtkWidget *memo, GtkWidget *gae,
-          gnc_commodity *comm, bool& fail)
+          gnc_commodity *comm, std::vector<std::string>& errors)
 {
     if (splitfield == DISABLED)
         return;
@@ -518,8 +519,8 @@ add_line (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
 
     if (gnc_amount_edit_expr_is_valid (GNC_AMOUNT_EDIT (gae), &amount, true, nullptr))
     {
-        amtstr = "missing";
-        fail = true;
+        amtstr = "(missing)";
+        errors.emplace_back ("Required amount missing");
     }
     else
     {
@@ -534,9 +535,10 @@ add_line (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
     }
 
     auto memostr = gtk_entry_get_text (GTK_ENTRY (memo));
-    auto acctstr = acct ? xaccAccountGetName (acct) : "missing";
+    auto acctstr = acct ? xaccAccountGetName (acct) : "(missing)";
 
-    if (!acct) fail = true;
+    if (!acct)
+        errors.emplace_back ("Required account missing");
 
     GtkTreeIter iter;
     gtk_list_store_append (*list, &iter);
@@ -548,31 +550,43 @@ add_line (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
                         -1);
 }
 
+static std::string join(const std::vector<std::string>& v, char c)
+{
+    std::string s;
+    for (std::vector<std::string>::const_iterator p = v.begin(); p != v.end(); ++p)
+    {
+        s += *p;
+        if (p != v.end() - 1)
+            s += c;
+    }
+    return s;
+}
+
 static void refresh_page_finish (StockTransactionInfo *info)
 {
-    auto view = GTK_TREE_VIEW (info->split_view);
+    auto view = GTK_TREE_VIEW (info->finish_split_view);
     auto list = GTK_LIST_STORE (gtk_tree_view_get_model(view));
     gtk_list_store_clear (list);
 
     gnc_numeric debit = gnc_numeric_zero ();
     gnc_numeric credit = gnc_numeric_zero ();
-    bool fail = false;
+    std::vector<std::string> errors;
 
-    add_line (&list, debit, credit, info->txn_type.stock_amount, info->acct, info->stock_memo_edit, info->stock_value_edit, info->currency, fail);
+    add_line (&list, debit, credit, info->txn_type.stock_amount, info->acct,
+              info->stock_memo_edit, info->stock_value_edit, info->currency, errors);
 
-    add_line (&list, debit, credit, info->txn_type.cash_amount, gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->cash_account)), info->cash_memo_edit, info->cash_amount, info->currency, fail);
+    add_line (&list, debit, credit, info->txn_type.cash_amount,
+              gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->cash_account)),
+              info->cash_memo_edit, info->cash_amount, info->currency, errors);
 
-    for (gint i = 0; i < 5; i++)
-    {
-        GtkTreeIter iter;
-        gtk_list_store_append (list, &iter);
-        gtk_list_store_set (list, &iter,
-                            SPLIT_COL_ACCOUNT, "acc",
-                            SPLIT_COL_MEMO, "memo",
-                            SPLIT_COL_DEBIT, "$10.00",
-                            SPLIT_COL_CREDIT, "$20.00",
-                            -1);
-    }
+    if (!gnc_numeric_equal (debit, credit))
+        errors.emplace_back ("Debits and credits are not balanced");
+
+    gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->finish_page,
+                                     errors.empty());
+
+    gtk_label_set_text (GTK_LABEL (info->finish_summary),
+                        join (errors, '\n').c_str());
 }
 
 void stock_assistant_prepare (GtkAssistant  *assistant, GtkWidget *page,
@@ -841,7 +855,7 @@ stock_assistant_create (StockTransactionInfo *info)
     info->stock_value_page = get_widget (builder, "stock_value_page");
     info->stock_value_edit = create_gae (builder, 0, info->currency, "stock_value_table", "stock_value_label");
     info->price_amount = get_widget (builder, "stock_price_amount");
-    info->stock_memo_edit = get_widget (builder, "stock_memo_edit");
+    info->stock_memo_edit = get_widget (builder, "stock_memo_entry");
     g_signal_connect (info->stock_value_edit, "changed",
                       G_CALLBACK (refresh_page_stock_value), info);
 
@@ -872,8 +886,9 @@ stock_assistant_create (StockTransactionInfo *info)
 
     /* Finish Page Widgets */
     info->finish_page = get_widget (builder, "finish_page");
-    info->split_view = get_widget (builder, "transaction_view");
-    auto view = GTK_TREE_VIEW (info->split_view);
+    info->finish_split_view = get_widget (builder, "transaction_view");
+    info->finish_summary = get_widget (builder, "finish_summary");
+    auto view = GTK_TREE_VIEW (info->finish_split_view);
     gtk_tree_view_set_grid_lines (GTK_TREE_VIEW(view), gnc_tree_view_get_grid_lines_pref ());
     auto store = gtk_list_store_new (NUM_SPLIT_COLS, G_TYPE_STRING, G_TYPE_STRING,
                                      G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
