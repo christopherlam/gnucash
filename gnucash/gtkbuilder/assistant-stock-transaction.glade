@@ -540,7 +540,7 @@
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="margin-bottom">6</property>
-            <property name="label" translatable="yes">In this page, input any broker fees incurred in this transaction. The fee may be capitalized into the asset account, or expensed into a broker fees account. Typically fees on purchase are capitalized, and fees on sales are expensed.</property>
+            <property name="label" translatable="yes">In this page, input any broker fees incurred in this transaction. The fee may be capitalized into the asset account, or expensed into a broker fees account. Typically fees on purchase are capitalized, and fees on sales are expensed. If there are no fees involved in this transaction, it can be left blank.</property>
             <property name="wrap">True</property>
           </object>
           <packing>
@@ -780,7 +780,7 @@
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="margin-bottom">6</property>
-            <property name="label" translatable="yes">In this page, input any capital gains or losses incurred, and the associated Capital Gains (typically an INCOME account).</property>
+            <property name="label" translatable="yes">In this page, input any capital gains or losses incurred, and the associated income account. Capital gains are positive, and capital losses are negative.</property>
             <property name="wrap">True</property>
           </object>
           <packing>
@@ -892,7 +892,7 @@
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="margin-bottom">6</property>
-            <property name="label" translatable="yes">If you are finished creating the transaction, press "Apply". You may also press "Back" to review your choices, or "Cancel" to quit without making any changes. A summary of splits is shown as follows.</property>
+            <property name="label" translatable="yes">A summary of splits is shown as follows. If the summary is correct, and there are no errors, please press "Apply". You may also press "Back" to review your choices, or "Cancel" to quit without making any changes. </property>
             <property name="wrap">True</property>
           </object>
           <packing>
@@ -927,7 +927,7 @@
           <object class="GtkLabel" id="finish_summary">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
-            <property name="label" translatable="yes">label</property>
+            <property name="label" translatable="yes">summary of errors</property>
           </object>
           <packing>
             <property name="expand">False</property>
