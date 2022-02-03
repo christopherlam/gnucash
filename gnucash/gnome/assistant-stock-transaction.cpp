@@ -624,16 +624,20 @@ static void refresh_page_finish (StockTransactionInfo *info)
                 false, "dividend", errors);
 
     // the next two checks will involve the two capgains splits:
-    // income side and stock side. The capgains_value ^ 3 will swap
-    // the debit/credit.
-    check_page (&list, debit, credit, info->txn_type.capgains_value,
-                gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->capgains_account)),
-                info->capgains_memo_edit, info->capgains_value, info->currency,
-                false, "capital gains", errors);
+    // income side and stock side. The capgains_value ^ 0b11 will swap
+    // the debit/credit flags.
+    if (info->txn_type.capgains_value != DISABLED)
+    {
+        check_page (&list, debit, credit, info->txn_type.capgains_value,
+                    gnc_account_sel_get_account (GNC_ACCOUNT_SEL
+                                                 (info->capgains_account)),
+                    info->capgains_memo_edit, info->capgains_value, info->currency,
+                    false, "capital gains", errors);
 
-    check_page (&list, debit, credit, info->txn_type.capgains_value ^ 3, info->acct,
-                info->capgains_memo_edit, info->capgains_value, info->currency,
-                false, "capital gains", errors);
+        check_page (&list, debit, credit, info->txn_type.capgains_value ^ 0b11,
+                    info->acct, info->capgains_memo_edit, info->capgains_value,
+                    info->currency, false, "capital gains", errors);
+    }
 
     if (!gnc_numeric_equal (debit, credit))
     {
