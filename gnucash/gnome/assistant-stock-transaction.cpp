@@ -435,7 +435,7 @@ static void refresh_page_transaction_type (GtkWidget *widget, gpointer user_data
     StockTransactionInfo *info = (StockTransactionInfo *)user_data;
 
     auto type_idx = gtk_combo_box_get_active (GTK_COMBO_BOX (widget));
-    info->txn_type = info->txn_types.at (type_idx); // fixme: need to check bounds
+    info->txn_type = info->txn_types.at (type_idx);
 
     auto explanation = info->transaction_type_explanation;
     gtk_label_set_text (GTK_LABEL (explanation), info->txn_type.explanation.c_str ());
@@ -623,24 +623,38 @@ static void refresh_page_finish (StockTransactionInfo *info)
                 info->dividend_memo_edit, info->dividend_value, info->currency,
                 false, "dividend", errors);
 
-    // must handle capgains can be any sign.
+    // the next two checks will involve the two capgains splits:
+    // income side and stock side. The capgains_value ^ 3 will swap
+    // the debit/credit.
     check_page (&list, debit, credit, info->txn_type.capgains_value,
                 gnc_account_sel_get_account (GNC_ACCOUNT_SEL (info->capgains_account)),
                 info->capgains_memo_edit, info->capgains_value, info->currency,
                 false, "capital gains", errors);
 
+    check_page (&list, debit, credit, info->txn_type.capgains_value ^ 3, info->acct,
+                info->capgains_memo_edit, info->capgains_value, info->currency,
+                false, "capital gains", errors);
+
     if (!gnc_numeric_equal (debit, credit))
+    {
         errors.emplace_back ("Debits and credits are not balanced");
+        g_print ("not balanced. dr=%s, cr=%s\n", gnc_numeric_to_string (debit),
+                 gnc_numeric_to_string (credit));
+    }
 
     if (errors.empty())
     {
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->finish_page, true);
-        gtk_label_set_text (GTK_LABEL (info->finish_summary), "No errors found. Click Apply to create transaction.");
+        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
+                                         info->finish_page, true);
+        gtk_label_set_text (GTK_LABEL (info->finish_summary),
+                            "No errors found. Click Apply to create transaction.");
     }
     else
     {
-        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window), info->finish_page, false);
-        gtk_label_set_text (GTK_LABEL (info->finish_summary), join (errors, '\n').c_str());
+        gtk_assistant_set_page_complete (GTK_ASSISTANT (info->window),
+                                         info->finish_page, false);
+        gtk_label_set_text (GTK_LABEL (info->finish_summary),
+                            join (errors, '\n').c_str());
     }
 }
 
