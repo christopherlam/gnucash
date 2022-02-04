@@ -541,11 +541,11 @@ check_page (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
     }
     else
     {
-        if (!(splitfield | ALLOW_NEGATIVE))
+        if (!(splitfield & ALLOW_NEGATIVE))
         {
-            if ((splitfield | ALLOW_ZERO) && gnc_numeric_negative_p (amount))
+            if ((splitfield & ALLOW_ZERO) && gnc_numeric_negative_p (amount))
                 add_error (errors, "Amount for %s must not be negative.", page);
-            else if (!(splitfield | ALLOW_ZERO) && !gnc_numeric_positive_p (amount))
+            else if (!(splitfield & ALLOW_ZERO) && !gnc_numeric_positive_p (amount))
                 add_error (errors, "Amount for %s must be positive.", page);
         }
         if (gnc_numeric_negative_p (amount))
