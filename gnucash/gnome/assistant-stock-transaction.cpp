@@ -526,6 +526,7 @@ check_page (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
             uint splitfield, Account *acct, GtkWidget *memo, GtkWidget *gae,
             gnc_commodity *comm, bool ignore_account,
             std::string page, StringVec& errors)
+
 {
     if (splitfield == DISABLED)
         return;
@@ -554,6 +555,7 @@ check_page (GtkListStore **list, gnc_numeric& debit, gnc_numeric& credit,
             debit = gnc_numeric_add_fixed (debit, amount);
         else
             credit = gnc_numeric_add_fixed (credit, amount);
+
         amtstr = xaccPrintAmount (amount, gnc_commodity_print_info (comm, true));
     }
 
