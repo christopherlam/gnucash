@@ -23,6 +23,11 @@
 #ifndef _GNC_SCRUBBUDGET_H_
 #define _GNC_SCRUBBUDGET_H_
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 #include <glib.h>
 #include <qofbook.h>
 
@@ -39,5 +44,9 @@
  */
 gboolean gnc_maybe_scrub_all_budget_signs (QofBook *book);
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // _GNC_SCRUBBUDGET_H_

@@ -33,6 +33,7 @@
 #include "gnc-budget.h"
 #include "gnc-features.h"
 #include "ScrubBudget.h"
+#include "qofinstance-p.h"
 
 static QofLogModule log_module = "gnc.engine.scrub";
 
@@ -52,7 +53,7 @@ typedef struct
 typedef struct
 {
     gint asset,liability,equity,income,expense;
-    gint num_periods;
+    guint num_periods;
     GncBudget* budget;
 } ProcessData;
 
@@ -170,6 +171,45 @@ fix_budget_acc_sign (Account *acc, gpointer user_data)
 }
 
 static void
+remove_obsolete_data (QofInstance* data, gpointer user_data)
+{
+    auto budget = GNC_BUDGET(data);
+    auto book = qof_instance_get_book (QOF_INSTANCE (budget));
+    auto slots = qof_instance_get_slots (QOF_INSTANCE (budget));
+    auto keys = slots->get_keys ();
+
+    for (auto& key : keys)
+    {
+        GncGUID guid;
+        Account *acc = string_to_guid (acct_guid, &guid) ?
+            xaccAccountLookup (&guid, book) : nullptr
+        PWARN ("has acct guid %s, found name = %s\n", key.c_str(),
+               acc ? xaccAccountGetName (acc) : "(missing)");
+
+        if (!acc)
+        {
+            std::vector<std::string> path { key };
+            PWARN ("scrubbing obsolete budget account %s", key.c_str());
+            qof_instance_slot_path_delete (QOF_INSTANCE(budget), path);
+        }
+        else
+        {
+            auto acc_slots = qof_instance_get_slots_prefix (QOF_INSTANCE(budget), key);
+            auto num_periods = gnc_budget_get_num_periods (budget);
+            auto num_period_keys = acc_slots.size();
+            PWARN ("acct %s, num_period = %d, num_frames = %ld",
+                   xaccAccountGetName (acc), num_periods, num_period_keys);
+            for (unsigned i = num_periods; i < num_period_keys; i++)
+            {
+                std::vector<std::string> path { key, std::to_string(i) };
+                PWARN ("scrubbing obsolete account period %d", i);
+                qof_instance_slot_path_delete (QOF_INSTANCE(budget), path);
+            };
+        }
+    }
+}
+
+static void
 maybe_scrub_budget (QofInstance* data, gpointer user_data)
 {
     GncBudget* budget = GNC_BUDGET(data);
@@ -196,6 +236,9 @@ gnc_maybe_scrub_all_budget_signs (QofBook *book)
     QofCollection* collection = qof_book_get_collection (book, GNC_ID_BUDGET);
     gboolean has_no_budgets = (qof_collection_count (collection) == 0);
     gboolean featured = gnc_features_check_used (book, GNC_FEATURE_BUDGET_UNREVERSED);
+
+    qof_collection_foreach (qof_book_get_collection (book, GNC_ID_BUDGET),
+                            remove_obsolete_data, nullptr);
 
     /* If there are no budgets, there shouldn't be feature! */
     if (has_no_budgets && featured)
