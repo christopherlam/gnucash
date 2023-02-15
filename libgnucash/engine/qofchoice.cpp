@@ -25,15 +25,15 @@
 #include <numeric>
 #include <vector>
 #include <string>
-#include <unordered_map>
+#include <map>
 #include <config.h>
 
 #include "qof.h"
 #include "qofchoice.h"
 
 using OptionVec = std::vector<char*>;
-using ParamMap = std::unordered_map<std::string, OptionVec>;
-using ChoiceMap = std::unordered_map<std::string, ParamMap>;
+using ParamMap = std::map<std::string, OptionVec>;
+using ChoiceMap = std::map<std::string, ParamMap>;
 static QofLogModule log_module = QOF_MOD_CHOICE;
 static ChoiceMap qof_choice_table;
 
