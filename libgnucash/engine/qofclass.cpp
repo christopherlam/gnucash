@@ -21,7 +21,7 @@
  *                                                                  *
 \********************************************************************/
 
-#include <unordered_map>
+#include <map>
 #include <string>
 #include <algorithm>
 
@@ -32,9 +32,9 @@
 
 static QofLogModule log_module = QOF_MOD_CLASS;
 
-using QofParamMap = std::unordered_map <std::string,const QofParam*>;
-static std::unordered_map<std::string,QofParamMap> classTable;
-static std::unordered_map<std::string,QofSortFunc> sortTable;
+using QofParamMap = std::map <std::string,const QofParam*>;
+static std::map<std::string,QofParamMap> classTable;
+static std::map<std::string,QofSortFunc> sortTable;
 
 /* *******************************************************************/
 /* PRIVATE FUNCTIONS */
