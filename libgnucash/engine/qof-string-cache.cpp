@@ -27,7 +27,7 @@
 \********************************************************************/
 
 #include <string>
-#include <unordered_map>
+#include <map>
 
 extern "C"
 {
@@ -49,7 +49,7 @@ static QofLogModule log_module = QOF_MOD_UTIL;
 /* key, and a ref count is the value                                   */
 /* =================================================================== */
 
-static std::unordered_map<std::string, guint> qof_string_cache;
+static std::map<std::string, unsigned int> qof_string_cache;
 
 void
 qof_string_cache_clear (void)
