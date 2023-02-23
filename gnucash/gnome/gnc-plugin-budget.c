@@ -26,6 +26,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "gnc-plugin-budget.h"
 #include "gnc-plugin-page-budget.h"
@@ -80,6 +81,15 @@ static const gchar *plugin_writeable_actions[] =
     NULL
 };
 
+static const gchar *plugin_disable_no_budget_actions[] =
+{
+    /* actions which must be disabled when no budgets exist. */
+    "OpenBudgetAction",
+    "CopyBudgetAction",
+    "DeleteBudgetAction",
+    NULL
+};
+
 typedef struct GncPluginBudgetPrivate
 {
     gpointer dummy;
@@ -111,9 +121,19 @@ page_changed (GncMainWindow *window, GncPluginPage *page, gpointer user_data)
     GSimpleActionGroup *simple_action_group =
         gnc_main_window_get_action_group (window, PLUGIN_ACTIONS_NAME);
 
-    if (qof_book_is_readonly (gnc_get_current_book()))
-        gnc_plugin_set_actions_enabled (G_ACTION_MAP(simple_action_group), plugin_writeable_actions,
-                                        FALSE);
+    QofBook *book = gnc_get_current_book ();
+    QofCollection *col = qof_book_get_collection (book, GNC_ID_BUDGET);
+    bool no_budgets = (qof_collection_count (col) == 0);
+    bool read_only = qof_book_is_readonly (book);
+
+    if (no_budgets)
+        gnc_plugin_set_actions_enabled (G_ACTION_MAP(simple_action_group),
+                                        plugin_disable_no_budget_actions, false);
+
+    if (read_only)
+        gnc_plugin_set_actions_enabled (G_ACTION_MAP(simple_action_group),
+                                        plugin_writeable_actions, false);
+
 }
 
 static void
