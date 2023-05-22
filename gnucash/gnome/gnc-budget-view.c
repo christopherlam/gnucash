@@ -1327,7 +1327,7 @@ totals_col_source (GtkTreeViewColumn *col, GtkCellRenderer *cell,
     for (GList *node = top_level_accounts; node; node = g_list_next (node))
     {
         Account *account = node->data;
-        GNCAccountType acctype = xaccAccountGetType (account);
+        GNCAccountType acctype = xaccAccountTypeGetFundamental (xaccAccountGetType (account));
 
         if ((row_type == TOTALS_TYPE_INCOME && acctype == ACCT_TYPE_INCOME) ||
             (row_type == TOTALS_TYPE_EXPENSES && acctype == ACCT_TYPE_EXPENSE) ||
