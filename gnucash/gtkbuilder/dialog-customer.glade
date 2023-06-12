@@ -489,7 +489,7 @@
                     <property name="border-width">3</property>
                     <property name="label-xalign">0</property>
                     <child>
-                      <!-- n-columns=2 n-rows=6 -->
+                      <!-- n-columns=2 n-rows=7 -->
                       <object class="GtkGrid">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
@@ -677,6 +677,32 @@
                           <packing>
                             <property name="left-attach">1</property>
                             <property name="top-attach">5</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="stripe_id">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="halign">end</property>
+                            <property name="label" translatable="yes">Stripe ID</property>
+                            <property name="justify">right</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">6</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkEntry" id="stripe_id_entry">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="tooltip-text" translatable="yes">The customer ID number. If left blank a reasonable number will be chosen for you</property>
+                            <property name="hexpand">True</property>
+                            <property name="activates-default">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">6</property>
                           </packing>
                         </child>
                       </object>

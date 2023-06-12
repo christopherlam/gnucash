@@ -56,7 +56,6 @@ struct _gncCustomer
     const char *    id;
     const char *    name;
     const char *    notes;
-    const char *    stripe_id;
     GncBillTerm *   terms;
     GncAddress *    addr;
     gnc_commodity * currency;
@@ -313,7 +312,6 @@ GncCustomer *gncCustomerCreate (QofBook *book)
     cust->id = CACHE_INSERT ("");
     cust->name = CACHE_INSERT ("");
     cust->notes = CACHE_INSERT ("");
-    cust->stripe_id = CACHE_INSERT ("");
     cust->addr = gncAddressCreate (book, &cust->inst);
     cust->taxincluded = GNC_TAXINCLUDED_USEGLOBAL;
     cust->active = TRUE;
@@ -349,7 +347,6 @@ static void gncCustomerFree (GncCustomer *cust)
     CACHE_REMOVE (cust->id);
     CACHE_REMOVE (cust->name);
     CACHE_REMOVE (cust->notes);
-    CACHE_REMOVE (cust->stripe_id);
     gncAddressBeginEdit (cust->addr);
     gncAddressDestroy (cust->addr);
     gncAddressBeginEdit (cust->shipaddr);
@@ -409,8 +406,18 @@ void gncCustomerSetNotes (GncCustomer *cust, const char *notes)
 
 void gncCustomerSetStripeID (GncCustomer *cust, const char *id)
 {
-    if (!cust || !id) return;
-    SET_STR(cust, cust->stripe_id, id);
+    g_return_if_fail (cust);
+    if (id)
+    {
+        GValue v = G_VALUE_INIT;
+        g_value_init (&v, G_TYPE_STRING);
+        g_value_set_static_string (&v, id);
+        gncCustomerBeginEdit (cust);
+        qof_instance_set_kvp (QOF_INSTANCE (cust), &v, 1, CUSTOMER_STRIPE_ID);
+        g_value_unset (&v);
+    }
+    else
+        qof_instance_set_kvp (QOF_INSTANCE (cust), NULL, 1, CUSTOMER_STRIPE_ID);
     mark_customer (cust);
     gncCustomerCommitEdit (cust);
 }
@@ -652,8 +659,12 @@ const char * gncCustomerGetNotes (const GncCustomer *cust)
 
 const char * gncCustomerGetStripeID (const GncCustomer *cust)
 {
-    if (!cust) return NULL;
-    return cust->stripe_id;
+    g_return_val_if_fail (cust, NULL);
+    GValue v = G_VALUE_INIT;
+    qof_instance_get_kvp (QOF_INSTANCE(cust), &v, 1, CUSTOMER_STRIPE_ID);
+    const char *id = G_VALUE_HOLDS_STRING (&v) ? g_value_get_string (&v) : NULL;
+    g_value_unset (&v);
+    return id;
 }
 
 GncBillTerm * gncCustomerGetTerms (const GncCustomer *cust)

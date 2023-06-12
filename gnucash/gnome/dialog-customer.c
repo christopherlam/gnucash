@@ -148,6 +148,7 @@ struct _customer_window
     GtkWidget *	terms_menu;
     GtkWidget *	discount_amount;
     GtkWidget *	credit_amount;
+    GtkWidget *	stripe_id_entry;
 
     GtkWidget *	active_check;
     GtkWidget *	taxincluded_menu;
@@ -215,6 +216,7 @@ static void gnc_ui_to_customer (CustomerWindow *cw, GncCustomer *cust)
 
     gncCustomerSetID (cust, gtk_entry_get_text (GTK_ENTRY (cw->id_entry)));
     gncCustomerSetName (cust, gtk_entry_get_text (GTK_ENTRY (cw->company_entry)));
+    gncCustomerSetStripeID (cust, gtk_entry_get_text (GTK_ENTRY (cw->stripe_id_entry)));
 
     gncAddressSetName (addr, gtk_entry_get_text (GTK_ENTRY (cw->name_entry)));
     gncAddressSetAddr1 (addr, gtk_entry_get_text (GTK_ENTRY (cw->addr1_entry)));
@@ -570,6 +572,7 @@ gnc_customer_new_window (GtkWindow *parent, QofBook *bookp, GncCustomer *cust)
     cw->active_check = GTK_WIDGET (gtk_builder_get_object (builder, "active_check"));
     cw->taxincluded_menu = GTK_WIDGET (gtk_builder_get_object (builder, "tax_included_menu"));
     cw->notes_text = GTK_WIDGET (gtk_builder_get_object (builder, "notes_text"));
+    cw->stripe_id_entry = GTK_WIDGET (gtk_builder_get_object (builder, "stripe_id_entry"));
 
     cw->terms_menu = GTK_WIDGET (gtk_builder_get_object (builder, "terms_menu"));
 
@@ -650,6 +653,9 @@ gnc_customer_new_window (GtkWindow *parent, QofBook *bookp, GncCustomer *cust)
         gtk_entry_set_text (GTK_ENTRY (cw->shipphone_entry), gncAddressGetPhone (shipaddr));
         gtk_entry_set_text (GTK_ENTRY (cw->shipfax_entry), gncAddressGetFax (shipaddr));
         gtk_entry_set_text (GTK_ENTRY (cw->shipemail_entry), gncAddressGetEmail (shipaddr));
+
+        /* set stripe ID */
+        gtk_entry_set_text (GTK_ENTRY (cw->stripe_id_entry), gncCustomerGetStripeID (cust));
 
         /* Set toggle buttons */
         gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (cw->active_check),
