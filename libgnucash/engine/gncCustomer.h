@@ -96,6 +96,7 @@ void gncCustomerCommitEdit (GncCustomer *customer);
 void gncCustomerSetID (GncCustomer *customer, const char *id);
 void gncCustomerSetName (GncCustomer *customer, const char *name);
 void gncCustomerSetNotes (GncCustomer *customer, const char *notes);
+void gncCustomerSetStripeID (GncCustomer *cust, const char *id);
 void gncCustomerSetTerms (GncCustomer *customer, GncBillTerm *term);
 void gncCustomerSetTaxIncluded (GncCustomer *customer, GncTaxIncluded taxincl);
 void gncCustomerSetActive (GncCustomer *customer, gboolean active);
@@ -127,6 +128,7 @@ const char * gncCustomerGetName (const GncCustomer *customer);
 GncAddress * gncCustomerGetAddr (const GncCustomer *customer);
 GncAddress * gncCustomerGetShipAddr (const GncCustomer *customer);
 const char * gncCustomerGetNotes (const GncCustomer *customer);
+const char * gncCustomerGetStripeID (const GncCustomer *cust);
 GncBillTerm * gncCustomerGetTerms (const GncCustomer *customer);
 GncTaxIncluded gncCustomerGetTaxIncluded (const GncCustomer *customer);
 gboolean gncCustomerGetActive (const GncCustomer *customer);
@@ -146,6 +148,7 @@ int gncCustomerCompare (const GncCustomer *a, const GncCustomer *b);
 #define CUSTOMER_ADDR       "addr"
 #define CUSTOMER_SHIPADDR   "shipaddr"
 #define CUSTOMER_NOTES      "notes"
+#define CUSTOMER_STRIPE_ID  "stripe-id"
 #define CUSTOMER_DISCOUNT   "amount of discount"
 #define CUSTOMER_CREDIT     "amount of credit"
 #define CUSTOMER_TT_OVER    "tax table override"

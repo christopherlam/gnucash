@@ -56,6 +56,7 @@ struct _gncCustomer
     const char *    id;
     const char *    name;
     const char *    notes;
+    const char *    stripe_id;
     GncBillTerm *   terms;
     GncAddress *    addr;
     gnc_commodity * currency;
@@ -312,6 +313,7 @@ GncCustomer *gncCustomerCreate (QofBook *book)
     cust->id = CACHE_INSERT ("");
     cust->name = CACHE_INSERT ("");
     cust->notes = CACHE_INSERT ("");
+    cust->stripe_id = CACHE_INSERT ("");
     cust->addr = gncAddressCreate (book, &cust->inst);
     cust->taxincluded = GNC_TAXINCLUDED_USEGLOBAL;
     cust->active = TRUE;
@@ -347,6 +349,7 @@ static void gncCustomerFree (GncCustomer *cust)
     CACHE_REMOVE (cust->id);
     CACHE_REMOVE (cust->name);
     CACHE_REMOVE (cust->notes);
+    CACHE_REMOVE (cust->stripe_id);
     gncAddressBeginEdit (cust->addr);
     gncAddressDestroy (cust->addr);
     gncAddressBeginEdit (cust->shipaddr);
@@ -400,6 +403,14 @@ void gncCustomerSetNotes (GncCustomer *cust, const char *notes)
     if (!cust) return;
     if (!notes) return;
     SET_STR(cust, cust->notes, notes);
+    mark_customer (cust);
+    gncCustomerCommitEdit (cust);
+}
+
+void gncCustomerSetStripeID (GncCustomer *cust, const char *id)
+{
+    if (!cust || !id) return;
+    SET_STR(cust, cust->stripe_id, id);
     mark_customer (cust);
     gncCustomerCommitEdit (cust);
 }
@@ -637,6 +648,12 @@ const char * gncCustomerGetNotes (const GncCustomer *cust)
 {
     if (!cust) return NULL;
     return cust->notes;
+}
+
+const char * gncCustomerGetStripeID (const GncCustomer *cust)
+{
+    if (!cust) return NULL;
+    return cust->stripe_id;
 }
 
 GncBillTerm * gncCustomerGetTerms (const GncCustomer *cust)
@@ -930,6 +947,7 @@ gboolean gncCustomerRegister (void)
         { CUSTOMER_ID, QOF_TYPE_STRING, (QofAccessFunc)gncCustomerGetID, (QofSetterFunc)gncCustomerSetID },
         { CUSTOMER_NAME, QOF_TYPE_STRING, (QofAccessFunc)gncCustomerGetName, (QofSetterFunc)gncCustomerSetName },
         { CUSTOMER_NOTES, QOF_TYPE_STRING, (QofAccessFunc)gncCustomerGetNotes, (QofSetterFunc)gncCustomerSetNotes },
+        { CUSTOMER_STRIPE_ID, QOF_TYPE_STRING, (QofAccessFunc)gncCustomerGetStripeID, (QofSetterFunc)gncCustomerSetStripeID, },
         {
             CUSTOMER_DISCOUNT, QOF_TYPE_NUMERIC, (QofAccessFunc)gncCustomerGetDiscount,
             (QofSetterFunc)gncCustomerSetDiscount
