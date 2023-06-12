@@ -6,4 +6,11 @@
       <description>To retrieve online quotes from Alphavantage, this key needs to be set. A key can be retrieved from the Alpha Vantage website.</description>
     </key>
   </schema>
+  <schema id="org.gnucash.GnuCash.general.stripe" path="/org/gnucash/GnuCash/general/stripe/">
+    <key name="stripe-api-key" type="s">
+      <default>''</default>
+      <summary>Stripe API key</summary>
+      <description>To send and retrieve invoices and payments from Stripe, this key needs to be set. A key can be retrieved from the Stripe website.</description>
+    </key>
+  </schema>
 </schemalist>

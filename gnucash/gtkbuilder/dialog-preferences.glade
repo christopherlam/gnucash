@@ -3680,6 +3680,30 @@ many months before the current month</property>
                   </packing>
                 </child>
                 <child>
+                  <object class="GtkLabel" id="stripeapilabel">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="tooltip-text" translatable="yes">To send and retrieve invoices and payments from Stripe, this key needs to be set. A key can be retrieved from the Stripe website.</property>
+                    <property name="label" translatable="yes">Stripe API key</property>
+                  </object>
+                  <packing>
+                    <property name="left-attach">0</property>
+                    <property name="top-attach">2</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkEntry" id="pref/general.stripe/stripe-api-key">
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="tooltip-text" translatable="yes">To send and retrieve invoices and payments from Stripe, this key needs to be set. A key can be retrieved from the Stripe website.</property>
+                    <property name="hexpand">True</property>
+                  </object>
+                  <packing>
+                    <property name="left-attach">1</property>
+                    <property name="top-attach">2</property>
+                  </packing>
+                </child>
+                <child>
                   <object class="GtkLabel" id="label22">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
