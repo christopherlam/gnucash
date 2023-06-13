@@ -28,6 +28,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 #include <libguile.h>
+#include <curl/curl.h>
 #include "swig-runtime.h"
 
 #include "qof.h"
@@ -1015,6 +1016,43 @@ gnc_invoice_window_printCB (GtkWindow* parent, gpointer data)
     gnc_main_window_open_page (GNC_MAIN_WINDOW (iw->dialog), iw->reportPage);
 }
 
+static void
+send_curl (const char *url, const char *poststr)
+{
+    CURL *curl = curl_easy_init();
+    if (!curl)
+    {
+        PWARN ("curl init failed");
+        return;
+    }
+
+    char *api_key = gnc_prefs_get_string ("general.stripe", "stripe-api-key");
+    if (!api_key || !api_key[0])
+    {
+        PWARN ("stripe api key missing");
+        g_free (api_key);
+        curl_easy_cleanup (curl);
+        return;
+    }
+    char *auth_str = g_strdup_printf ("Authorization: Bearer %s", api_key);
+
+    curl_easy_setopt (curl, CURLOPT_URL, url);
+    curl_easy_setopt (curl, CURLOPT_POSTFIELDS, poststr);
+
+    struct curl_slist* headers = NULL;
+    headers = curl_slist_append (headers, auth_str);
+    curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers);
+
+    CURLcode res = curl_easy_perform (curl);
+    if (res != CURLE_OK)
+        PWARN ("curl_easy_perform() failed: %s", curl_easy_strerror (res));
+
+    g_free (auth_str);
+    g_free (api_key);
+    curl_slist_free_all (headers);
+    curl_easy_cleanup (curl);
+}
+
 static gboolean
 gnc_dialog_post_invoice(InvoiceWindow *iw, char *message,
                         time64 *ddue, time64 *postdate,
@@ -1085,6 +1123,22 @@ gnc_dialog_post_invoice(InvoiceWindow *iw, char *message,
         return FALSE;
 
     return TRUE;
+}
+
+static void
+send_to_stripe (GncInvoice *invoice)
+{
+    // stripe useful for Customer invoices only!
+    if (gncInvoiceGetOwnerType (invoice) != GNC_OWNER_CUSTOMER)
+        return;
+
+    PWARN ("sending to stripe");
+    const GncOwner *owner = gncInvoiceGetOwner (invoice);
+    const GncCustomer *customer = gncOwnerGetCustomer (owner);
+    const char *stripe_id = gncCustomerGetStripeID (customer);
+    char *post_str = g_strdup_printf ("customer=%s", stripe_id);
+    send_curl ("https://api.stripe.com/v1/invoices", post_str);
+    g_free (post_str);
 }
 
 struct post_invoice_params
@@ -1280,6 +1334,7 @@ gnc_invoice_post(InvoiceWindow *iw, struct post_invoice_params *post_params)
         auto_pay = gnc_prefs_get_bool (GNC_PREFS_GROUP_BILL, GNC_PREF_AUTO_PAY);
 
     gncInvoicePostToAccount (invoice, acc, postdate, ddue, memo, accumulate, auto_pay);
+    send_to_stripe (invoice);
 
 cleanup:
     gncInvoiceCommitEdit (invoice);

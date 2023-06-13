@@ -127,6 +127,12 @@ set (gnc_gnome_SOURCES
 
 set_source_files_properties (${gnc_gnome_SOURCES} PROPERTIES OBJECT_DEPENDS ${CONFIG_H})
 
+include(FindPkgConfig)
+pkg_check_modules(CURL libcurl REQUIRED)
+include_directories(
+  SYSTEM ${CURL_INCLUDE_DIRS}
+)
+
 add_library (gnc-gnome ${gnc_gnome_SOURCES} ${gnc_gnome_noinst_HEADERS} ${SWIG_GNOME_C})
 target_link_libraries(gnc-gnome
     gnc-gnome-search
@@ -142,6 +148,7 @@ target_link_libraries(gnc-gnome
     gnc-locale-tax
     gnucash-guile
     ${Boost_LIBRARIES}
+    ${CURL_LIBRARIES}
     PkgConfig::GTK3
     ${GTK_MAC_LDFLAGS})
 
