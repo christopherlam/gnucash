@@ -67,6 +67,13 @@ Account * gnc_get_current_root_account (void);
 
 #if defined(SWIGGUILE)
 
+/* not sure if needed: */
+/* %newobject gnc_regex_new; */
+
+GRegex * gnc_regex_new (const char *pattern);
+bool gnc_regex_match (GRegex *regex, const char *str);
+void gnc_regex_destroy (GRegex *regex);
+
 gnc_commodity * gnc_default_currency (void);
 gnc_commodity * gnc_default_report_currency (void);
 

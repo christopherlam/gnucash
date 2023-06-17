@@ -34,6 +34,7 @@
 
 #include <glib.h>
 #include <locale.h>
+#include <stdbool.h>
 
 #include "Account.h"
 #include "gncOwner.h"
@@ -455,6 +456,11 @@ gchar * gnc_filter_text_for_currency_symbol (const gchar *incoming_text,
 gchar * gnc_filter_text_for_currency_commodity (const gnc_commodity *comm,
                                                 const gchar *incoming_text,
                                                 const gchar **symbol);
+
+
+GRegex* gnc_regex_new (const char *pattern);
+bool gnc_regex_match (GRegex *regex, const char *str);
+void gnc_regex_destroy (GRegex *regex);
 
 #ifdef __cplusplus
 }

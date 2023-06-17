@@ -2340,3 +2340,21 @@ gnc_filter_text_for_currency_commodity (const gnc_commodity *comm,
 
     return gnc_filter_text_for_currency_symbol (incoming_text, *symbol);
 }
+
+GRegex *
+gnc_regex_new (const char *pattern)
+{
+    return g_regex_new (pattern, G_REGEX_OPTIMIZE, 0, NULL);
+}
+
+bool
+gnc_regex_match (GRegex *regex, const char *str)
+{
+    return g_regex_match (regex, str, 0, NULL);
+}
+
+void
+gnc_regex_destroy (GRegex *regex)
+{
+    g_regex_unref (regex);
+}

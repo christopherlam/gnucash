@@ -2422,6 +2422,12 @@ be excluded from periodic reporting.")
           (((? from-account?) . _) #t)
           ((_ . rest) (lp rest)))))
 
+    (let ((reg (gnc-regex-new "#[a-z]+")))
+      (pk 'reg reg)
+      (pk 'matches (gnc-regex-match reg "#abc"))
+      (pk 'doesn't-match (gnc-regex-match reg "abc"))
+      (gnc-regex-destroy reg))
+
     (cond
      ((or (null? c_account_1)
           (symbol? account-matcher-regexp)
