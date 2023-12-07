@@ -46,14 +46,11 @@
 (setlocale LC_ALL "C")
 
 (define (run-test)
-  (if #f
+  (if #t
       (coverage-test)
       (run-test-proper)))
 
 (define (coverage-test)
-  (let* ((currfile (dirname (current-filename)))
-         (path (string-take currfile (string-rindex currfile #\/))))
-    (add-to-load-path path))
   (call-with-values
       (lambda()
         (with-code-coverage run-test-proper))
