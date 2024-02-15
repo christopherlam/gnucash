@@ -194,6 +194,11 @@ test_commodity(void)
         qof_book_destroy (book);
     }
 
+    auto hels_source = gnc_quote_source_lookup_by_internal ("hex");
+    auto hels_idx = gnc_quote_source_get_index (hels_source);
+
+    do_test (hels_source != nullptr, "helsinki quote source exists");
+    do_test (hels_idx != 0, "helsinki quote source isn't the first one");
 }
 
 int
