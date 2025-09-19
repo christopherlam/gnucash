@@ -1,11 +1,26 @@
-FROM docker.io/library/archlinux:latest
+FROM fedora:latest
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN pacman -Syu --quiet --noconfirm glibc gcc cmake make boost python3 pkg-config gettext gtk3 guile git ninja gtest gmock sqlite3 webkit2gtk swig gwenhywfar aqbanking intltool libxslt libofx postgresql-libs libmariadbclient libdbi libdbi-drivers wayland-protocols ccache valgrind perl && pacman -Scc --noconfirm
-
-ENV CCACHE_DIR=/ccache
-ENV PATH="/usr/lib/ccache/bin:${PATH}"
+# Essential build deps + GUI + ccache + valgrind
+RUN dnf -y install \
+        gcc gcc-c++ make automake autoconf libtool \
+        cmake ninja-build git \
+        guile30 guile30-devel \
+        pkg-config \
+        gtk3 gtk3-devel \
+        webkit2gtk4.0 webkit2gtk4.0-devel \
+        libdbi-dbd-sqlite libdbi-devel \
+        boost-devel \
+        gtest-devel \
+        gmock-devel \
+        libxml2-devel \
+        libxslt-devel \
+        swig \
+        gettext gettext-devel \
+        glib2-devel \
+        python3 python3-devel \
+        valgrind \
+        perl-podlators \
+    && dnf clean all
 
 WORKDIR /app
-CMD ["bash"]
+CMD bash

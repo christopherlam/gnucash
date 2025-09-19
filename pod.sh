@@ -19,7 +19,7 @@ ACTION=${1:-run}
 
 # Run container
 podman run -it --rm \
-  -v "$WORKDIR:/app:Z" \
+  -v "$WORKDIR/stable:/app:Z" \
   -v gnucash-build:/app/build:Z \
   -v gnucash-ccache:/ccache:Z \
   -e DISPLAY=$DISPLAY \
@@ -32,7 +32,7 @@ podman run -it --rm \
         rm -rf ./*
     fi
     echo 'Configuring CMake...'
-    cmake -GNinja .. -DCMAKE_BUILD_TYPE=Debug -DWITH_OFX=ON -DWITH_AQBANKING=OFF
+    cmake -GNinja .. -DCMAKE_BUILD_TYPE=Debug -DWITH_OFX=OFF -DWITH_AQBANKING=OFF
     echo 'Building with Ninja...'
     ninja
     echo 'CCache stats:'
