@@ -2,46 +2,55 @@
 set -e
 
 IMAGE_NAME=gnucash-dev
-WORKDIR=$PWD
-
-# Build container if missing
-if ! podman image exists $IMAGE_NAME; then
-    echo "Building container $IMAGE_NAME..."
-    podman build -t $IMAGE_NAME -f Containerfile
-fi
-
-# Create persistent volumes if missing
-podman volume inspect gnucash-build >/dev/null 2>&1 || podman volume create gnucash-build
-podman volume inspect gnucash-ccache >/dev/null 2>&1 || podman volume create gnucash-ccache
-
-# Action argument: run (default), rebuild, valgrind
 ACTION=${1:-run}
 
-# Run container
+# ---- Build the image if missing ----
+if ! podman image exists "$IMAGE_NAME"; then
+  echo "Building container image $IMAGE_NAME..."
+  podman build -t "$IMAGE_NAME" -f - <<'EOF'
+FROM fedora:latest
+RUN dnf -y install \
+      gcc gcc-c++ make automake autoconf libtool cmake ninja-build git \
+      guile30{,-devel} pkg-config gtk3{,-devel} webkit2gtk4.0{,-devel} \
+      libdbi{,-devel} libdbi-dbd-sqlite boost-devel gtest-devel gmock-devel \
+      libxml2-devel libxslt-devel swig gettext{,-devel} glib2-devel \
+      python3{,-devel} valgrind perl-podlators \
+    && dnf clean all
+WORKDIR /app
+EOF
+fi
+
+# ---- Ensure persistent build volume ----
+podman volume inspect gnucash-build >/dev/null 2>&1 || podman volume create gnucash-build
+
+# ---- Build, install, and run inside the container ----
 podman run -it --rm \
-  -v "$WORKDIR/stable:/app:Z" \
+  -v "$PWD:/app:Z" \
   -v gnucash-build:/app/build:Z \
-  -v gnucash-ccache:/ccache:Z \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:Z \
-  $IMAGE_NAME bash -c "
+  "$IMAGE_NAME" bash -c "
     mkdir -p /app/build
     cd /app/build
     if [ '$ACTION' = 'rebuild' ]; then
         echo 'Cleaning build directory...'
         rm -rf ./*
     fi
-    echo 'Configuring CMake...'
-    cmake -GNinja .. -DCMAKE_BUILD_TYPE=Debug -DWITH_OFX=OFF -DWITH_AQBANKING=OFF
+    echo 'Configuring CMake with install prefix...'
+    cmake -GNinja ..  -DCMAKE_BUILD_TYPE=Debug -DWITH_OFX=OFF \
+          -DWITH_AQBANKING=OFF -DCMAKE_INSTALL_PREFIX=/usr/local
     echo 'Building with Ninja...'
     ninja
-    echo 'CCache stats:'
-    ccache -s
-    if [ '$ACTION' = 'run' ]; then
-        echo 'Running GnuCash...'
-        ./bin/gnucash
-    elif [ '$ACTION' = 'valgrind' ]; then
-        echo 'Running GnuCash under Valgrind...'
-        valgrind ./bin/gnucash
-    fi
+    echo 'Installing to /usr/local...'
+    ninja install > /dev/null
+    case '$ACTION' in
+      run)
+        echo 'Running installed GnuCash...'
+        /usr/local/bin/gnucash
+        ;;
+      valgrind)
+        echo 'Running installed GnuCash under Valgrind...'
+        valgrind /usr/local/bin/gnucash
+        ;;
+    esac
   "
