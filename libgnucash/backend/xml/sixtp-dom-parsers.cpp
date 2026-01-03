@@ -176,10 +176,7 @@ static KvpValue*
 dom_tree_to_gdate_kvp_value (xmlNodePtr node)
 {
     auto date = dom_tree_to_gdate (node);
-    if (!date) return nullptr;
-    auto rv{new KvpValue {*date}};
-    g_date_free (date);
-    return rv;
+    return date ? new KvpValue {*date} : nullptr;
 }
 
 gboolean
@@ -490,7 +487,7 @@ dom_tree_to_time64 (xmlNodePtr node)
     return ret;
 }
 
-GDate*
+std::optional<GDate>
 dom_tree_to_gdate (xmlNodePtr node)
 {
     /* Turn something like this
@@ -527,23 +524,23 @@ dom_tree_to_gdate (xmlNodePtr node)
             if (g_strcmp0 ("gdate", (char*)n->name) == 0)
             {
                 if (seen_date || !apply_xmlnode_text<bool> (try_setting_date, n))
-                    return NULL;
+                    return {};
                 seen_date = TRUE;
             }
             break;
         default:
             PERR ("unexpected sub-node.");
-            return NULL;
+            return {};
         }
     }
 
     if (!seen_date)
     {
         PWARN ("no gdate node found.");
-        return NULL;
+        return {};
     }
 
-    return g_date_copy (&ret);
+    return ret;
 }
 
 struct CommodityRef
