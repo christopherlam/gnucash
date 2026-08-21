@@ -56,10 +56,17 @@ struct _GncPriceClass
     QofInstanceClass parent_class;
 };
 
+/* The actual storage for the price database is implemented with C++ STL
+ * containers (see GncPriceDBImpl in gnc-pricedb.cpp). It is kept behind
+ * this opaque pointer, rather than as direct members of this struct,
+ * because this header (via typedef GNCPriceDB in gnc-engine.h) is included
+ * by plain C translation units (e.g. libgnucash/engine/test/utest-gnc-pricedb.c)
+ * that cannot parse C++-only member types. Only gnc-pricedb.cpp may
+ * dereference impl. */
 struct gnc_price_db_s
 {
     QofInstance inst;              /* globally unique object identifier */
-    GHashTable *commodity_hash;
+    struct GncPriceDBImpl *impl;   /* opaque pointer to private C++ implementation */
     gboolean bulk_update;		 /* TRUE while reading XML file, etc. */
     gboolean reset_nth_price_cache;
 };
