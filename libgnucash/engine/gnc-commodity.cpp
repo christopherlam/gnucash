@@ -110,23 +110,74 @@ struct _GncCommodityClass
 static void commodity_free(gnc_commodity * cm);
 static void gnc_commodity_set_default_symbol(gnc_commodity *, const char *);
 
-using CommodityMap = std::unordered_map<std::string, gnc_commodity*>;
-using CommodityVec = std::vector<gnc_commodity*>;
+/* A minimal ordered associative container backed by a single
+ * std::vector<std::pair<std::string, T*>>, preserving insertion order.
+ * This replaces a GHashTable+GList pair (a hash table for O(1) lookup,
+ * plus a separately-maintained GList for insertion-order iteration),
+ * which required two containers to be kept in sync on every insert and
+ * remove. For the modest sizes involved here (typically tens of
+ * namespaces, and commodity counts per namespace rarely reaching into
+ * the thousands), a flat vector scanned linearly beats a node-based hash
+ * table in practice: no per-entry heap allocation/pointer-chasing, and
+ * much better cache locality; lookups are the dominant operation
+ * (namespaces/commodities are added and removed comparatively rarely). */
+template <typename T>
+struct KeyedVec
+{
+    using Entry = std::pair<std::string, T*>;
+    using Container = std::vector<Entry>;
+
+    Container entries;
+
+    typename Container::const_iterator begin() const { return entries.begin(); }
+    typename Container::const_iterator end() const { return entries.end(); }
+
+    std::size_t size() const { return entries.size(); }
+
+    T* find (const std::string& key) const
+    {
+        auto it = std::find_if (entries.begin(), entries.end(),
+                                [&key](const Entry& e) { return e.first == key; });
+        return it == entries.end() ? nullptr : it->second;
+    }
+
+    void insert_or_assign (const std::string& key, T* value)
+    {
+        auto it = std::find_if (entries.begin(), entries.end(),
+                                [&key](const Entry& e) { return e.first == key; });
+        if (it != entries.end())
+            it->second = value;
+        else
+            entries.emplace_back (key, value);
+    }
+
+    void erase_key (const std::string& key)
+    {
+        entries.erase (std::remove_if (entries.begin(), entries.end(),
+                                       [&key](const Entry& e) { return e.first == key; }),
+                      entries.end());
+    }
+
+    void erase_value (T* value)
+    {
+        entries.erase (std::remove_if (entries.begin(), entries.end(),
+                                       [value](const Entry& e) { return e.second == value; }),
+                      entries.end());
+    }
+
+    void clear () { entries.clear(); }
+};
 
 /* Private implementation details for gnc_commodity_namespace_s. This is
  * kept behind an opaque pointer rather than embedded directly because
  * gnc_commodity_namespace_s is allocated with g_object_new(), which
  * zero-initializes the instance memory instead of invoking C++
- * constructors -- an embedded std::unordered_map/std::vector would never
- * be properly constructed. */
+ * constructors -- an embedded KeyedVec would never be properly
+ * constructed. */
 struct GncCommodityNamespaceImpl
 {
-    CommodityMap cm_table;   /* mnemonic -> gnc_commodity*; replaces the
-                                 old g_str_hash/g_str_equal GHashTable */
-    CommodityVec cm_list;    /* commodities in this namespace, in
-                                 insertion order; replaces the old GList
-                                 that was built with g_list_append in a
-                                 loop (O(n^2) on load) */
+    KeyedVec<gnc_commodity> cm_table;   /* mnemonic -> gnc_commodity*, in
+                                            insertion order */
 };
 
 struct gnc_commodity_namespace_s
@@ -143,21 +194,15 @@ struct _GncCommodityNamespaceClass
     QofInstanceClass parent_class;
 };
 
-using NamespaceMap = std::unordered_map<std::string, gnc_commodity_namespace*>;
-using NamespaceVec = std::vector<gnc_commodity_namespace*>;
-
 /* Private implementation details for gnc_commodity_table_s. This struct is
  * allocated with g_new0() rather than g_object_new(), but g_new0() also
  * only zeroes memory rather than invoking C++ constructors, so the same
  * opaque-pointer treatment as GncCommodityNamespaceImpl is required. */
 struct GncCommodityTableImpl
 {
-    NamespaceMap ns_table;   /* namespace name -> gnc_commodity_namespace*;
-                                 replaces the old g_str_hash/g_str_equal
-                                 GHashTable */
-    NamespaceVec ns_list;    /* namespaces, in insertion order; replaces
-                                 the old GList that was built with
-                                 g_list_append in a loop (O(n^2) on load) */
+    KeyedVec<gnc_commodity_namespace> ns_table;   /* namespace name ->
+                                                      gnc_commodity_namespace*,
+                                                      in insertion order */
 };
 
 struct gnc_commodity_table_s
@@ -165,15 +210,15 @@ struct gnc_commodity_table_s
     GncCommodityTableImpl *impl;
 };
 
-/* Build a GList* (in the same order as vec) out of a std::vector of
- * pointers, without repeated g_list_append (which is O(n) per call and
- * so O(n^2) over a loop). Caller owns the returned list. */
+/* Build a GList* (in the same order as kv) out of a KeyedVec's values,
+ * without repeated g_list_append (which is O(n) per call and so O(n^2)
+ * over a loop). Caller owns the returned list. */
 template <typename T> static GList*
-vec_to_glist (const std::vector<T*>& vec)
+keyed_vec_to_glist (const KeyedVec<T>& kv)
 {
     GList *result = nullptr;
-    for (auto it = vec.rbegin(); it != vec.rend(); ++it)
-        result = g_list_prepend (result, static_cast<gpointer>(*it));
+    for (auto it = kv.entries.rbegin(); it != kv.entries.rend(); ++it)
+        result = g_list_prepend (result, static_cast<gpointer>(it->second));
     return result;
 }
 
@@ -1592,7 +1637,7 @@ gnc_commodity_namespace_get_commodity_list(const gnc_commodity_namespace *name_s
     if (!name_space)
         return nullptr;
 
-    return vec_to_glist (name_space->impl->cm_list);
+    return keyed_vec_to_glist (name_space->impl->cm_table);
 }
 
 gboolean
@@ -1707,8 +1752,7 @@ gnc_commodity_table_lookup(const gnc_commodity_table * table,
             if (it != gnc_new_iso_codes.end())
                 mnemonic = it->second.c_str();
         }
-        auto it = nsp->impl->cm_table.find (mnemonic);
-        return (it == nsp->impl->cm_table.end()) ? nullptr : it->second;
+        return nsp->impl->cm_table.find (mnemonic);
     }
     else
     {
@@ -1849,8 +1893,7 @@ gnc_commodity_table_insert(gnc_commodity_table * table,
 
     PINFO ("insert %p %s into nsp=%p %s", priv->mnemonic, priv->mnemonic,
            nsp->impl, nsp->name);
-    nsp->impl->cm_table[priv->mnemonic] = comm;
-    nsp->impl->cm_list.push_back(comm);
+    nsp->impl->cm_table.insert_or_assign(priv->mnemonic, comm);
 
     qof_event_gen (&comm->inst, QOF_EVENT_ADD, nullptr);
     LEAVE ("(table=%p, comm=%p)", table, comm);
@@ -1884,9 +1927,7 @@ gnc_commodity_table_remove(gnc_commodity_table * table,
     nsp = gnc_commodity_table_find_namespace(table, ns_name);
     if (!nsp) return;
 
-    auto& cm_list = nsp->impl->cm_list;
-    cm_list.erase(std::remove(cm_list.begin(), cm_list.end(), comm), cm_list.end());
-    nsp->impl->cm_table.erase(priv->mnemonic);
+    nsp->impl->cm_table.erase_value(comm);
 }
 
 /********************************************************************
@@ -1927,13 +1968,12 @@ gnc_commodity_table_get_namespaces(const gnc_commodity_table * table)
     if (!table)
         return nullptr;
 
-    /* Return the interned namespace-name pointers (ns->name), the same
-     * pointers that are used as the ns_table keys, in namespace
-     * insertion order. */
+    /* Return the interned namespace-name pointers (ns->name), in
+     * namespace insertion order. */
     GList *result = nullptr;
-    const auto& ns_list = table->impl->ns_list;
-    for (auto it = ns_list.rbegin(); it != ns_list.rend(); ++it)
-        result = g_list_prepend (result, (gpointer)(*it)->name);
+    const auto& entries = table->impl->ns_table.entries;
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it)
+        result = g_list_prepend (result, (gpointer)it->second->name);
     return result;
 }
 
@@ -1943,7 +1983,7 @@ gnc_commodity_table_get_namespaces_list(const gnc_commodity_table * table)
     if (!table)
         return nullptr;
 
-    return vec_to_glist (table->impl->ns_list);
+    return keyed_vec_to_glist (table->impl->ns_table);
 }
 
 /* Because gnc_commodity_table_add_namespace maps GNC_COMMODITY_NS_ISO to
@@ -2134,8 +2174,7 @@ gnc_commodity_table_add_namespace(gnc_commodity_table * table,
         qof_instance_init_data (&ns->inst, GNC_ID_COMMODITY_NAMESPACE, book);
         qof_event_gen (&ns->inst, QOF_EVENT_CREATE, nullptr);
 
-        table->impl->ns_table[ns->name] = ns;
-        table->impl->ns_list.push_back(ns);
+        table->impl->ns_table.insert_or_assign(ns->name, ns);
         qof_event_gen (&ns->inst, QOF_EVENT_ADD, nullptr);
     }
     return ns;
@@ -2159,9 +2198,17 @@ gnc_commodity_table_rename_namespace(const gnc_commodity_table * table,
 
     ns->name = CACHE_INSERT(static_cast<const char*>(new_namespace_name));
 
-    table->impl->ns_table[ns->name] = ns;
-
-    table->impl->ns_table.erase(namespace_name);
+    /* Rekey ns's entry in place (rather than erase + insert_or_assign)
+     * so its position in ns_table's insertion order -- and therefore in
+     * gnc_commodity_table_get_namespaces[_list]()'s output -- is
+     * unaffected by the rename, matching the previous GHashTable-based
+     * behavior where renaming never touched the separate order-providing
+     * GList. */
+    auto& entries = table->impl->ns_table.entries;
+    auto it = std::find_if (entries.begin(), entries.end(),
+                            [namespace_name](const auto& e) { return e.first == namespace_name; });
+    if (it != entries.end())
+        it->first = ns->name;
 
     CACHE_REMOVE(namespace_name);
 
@@ -2178,8 +2225,7 @@ gnc_commodity_table_find_namespace(const gnc_commodity_table * table,
         return nullptr;
 
     name_space = gnc_commodity_table_map_namespace(name_space);
-    auto it = table->impl->ns_table.find(name_space);
-    return (it == table->impl->ns_table.end()) ? nullptr : it->second;
+    return table->impl->ns_table.find(name_space);
 }
 
 
@@ -2210,11 +2256,7 @@ gnc_commodity_table_delete_namespace(gnc_commodity_table * table,
         return;
 
     qof_event_gen (&ns->inst, QOF_EVENT_REMOVE, nullptr);
-    table->impl->ns_table.erase(name_space);
-    auto& ns_list = table->impl->ns_list;
-    ns_list.erase(std::remove(ns_list.begin(), ns_list.end(), ns), ns_list.end());
-
-    ns->impl->cm_list.clear();
+    table->impl->ns_table.erase_key(name_space);
 
     for (auto& cm_entry : ns->impl->cm_table)
         gnc_commodity_destroy(GNC_COMMODITY(cm_entry.second));
@@ -2265,10 +2307,14 @@ gnc_commodity_table_destroy(gnc_commodity_table * t)
     if (!t) return;
     ENTER ("table=%p", t);
 
-    /* gnc_commodity_table_delete_namespace mutates t->impl->ns_list, so
-     * iterate over a snapshot copy rather than the live vector. */
-    NamespaceVec ns_list_copy = t->impl->ns_list;
-    for (auto* ns : ns_list_copy)
+    /* gnc_commodity_table_delete_namespace mutates t->impl->ns_table, so
+     * iterate over a snapshot copy of the namespace pointers rather than
+     * the live container. */
+    std::vector<gnc_commodity_namespace*> ns_snapshot;
+    ns_snapshot.reserve (t->impl->ns_table.size());
+    for (const auto& entry : t->impl->ns_table)
+        ns_snapshot.push_back (entry.second);
+    for (auto* ns : ns_snapshot)
         gnc_commodity_table_delete_namespace(t, ns->name);
 
     delete t->impl;
