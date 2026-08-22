@@ -2608,13 +2608,12 @@ pricedb_pricelist_traversal(GNCPriceDB *db,
     if (!db || !f) return FALSE;
     if (!db->impl) return FALSE;
 
-    gboolean ok = TRUE;
     for (auto& commodity_entry : db->impl->commodity_map)
         for (auto& currency_entry : commodity_entry.second)
-            if (ok)
-                ok = f(currency_entry.second, user_data);
+            if (!f(currency_entry.second, user_data))
+                return FALSE;
 
-    return ok;
+    return TRUE;
 }
 
 static bool
