@@ -41,7 +41,6 @@ podman volume inspect gnucash-build >/dev/null 2>&1 || podman volume create gnuc
 
 # ---- Build, install, and run inside the container ----
 podman run -it --rm \
-  --userns=keep-id \
   -v "$PWD:/app:Z" \
   -v gnucash-build:/app/build:Z \
   -e DISPLAY="$DISPLAY" \
