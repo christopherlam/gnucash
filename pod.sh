@@ -29,6 +29,7 @@ podman build -t "$IMAGE_NAME" --build-arg "FEDORA_VERSION=$FEDORA_VERSION" -f - 
 ARG FEDORA_VERSION
 FROM fedora:${FEDORA_VERSION}
 RUN dnf -y install dnf-plugins-core \
+      glibc-langpack-en glibc-langpack-fr \
     && dnf builddep -y gnucash \
     && dnf clean all
 WORKDIR /app
