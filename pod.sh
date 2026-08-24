@@ -47,6 +47,7 @@ podman run -it --rm \
   -e XDG_RUNTIME_DIR="/run/user/$UID" \
   -e NO_AT_BRIDGE=1 \
   -e ACTION="$ACTION" \
+  -e GDK_PIXBUF_ENABLE_XPM=1 \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v "/run/user/$UID:/run/user/$UID" \
   -v /etc/machine-id:/etc/machine-id:ro \
