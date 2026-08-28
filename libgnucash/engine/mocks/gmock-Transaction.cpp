@@ -57,7 +57,10 @@ SplitList *
 xaccTransGetSplitList (const Transaction *trans)
 {
     g_return_val_if_fail(GNC_IS_MOCKTRANSACTION(trans), NULL);
-    return trans ? ((MockTransaction*)trans)->get_split_list() : NULL;
+    /* Mirror the real xaccTransGetSplitList(): return a fresh list the
+     * caller owns and may free, not the mock's internal list (which
+     * belongs to the test fixture and may be reused across calls). */
+    return trans ? g_list_copy (((MockTransaction*)trans)->get_split_list()) : NULL;
 }
 
 Split *
