@@ -28,7 +28,6 @@ public:
         num                 = nullptr;
         description         = nullptr;
         common_currency     = nullptr;
-        splits              = nullptr;
         date_entered        = 0;
         date_posted         = 0;
         marker              = 0;

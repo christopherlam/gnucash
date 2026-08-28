@@ -48,6 +48,7 @@ set (engine_HEADERS
   Split.h
   TransLog.h
   Transaction.h
+  Transaction.hpp
   cap-gains.h
   cashobjects.h
   engine-helpers.h

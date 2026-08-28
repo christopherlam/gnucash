@@ -25,9 +25,11 @@
 
 #include <config.h>
 #include <string.h>
+#include <algorithm>
 #include <unittest-support.h>
 /* Add specific headers for this class */
 #include "../Transaction.h"
+#include "../Transaction.hpp"
 #include "../TransactionP.hpp"
 #include "../Split.h"
 #include "../Account.h"
@@ -193,7 +195,7 @@ setup_with_gains (GainsFixture *fixture, gconstpointer pData)
         xaccSplitSetParent (gains_split2, fixture->gains_txn);
     }
     xaccTransCommitEdit (fixture->gains_txn);
-    auto base_split = static_cast<Split*>(g_list_nth_data (base->txn->splits, 1));
+    auto base_split = base->txn->splits.at (1);
     base_split->gains_split = gains_split1;
 }
 
@@ -287,21 +289,19 @@ void mark_trans (Transaction *trans)// Local: 3:0:0
 static void
 test_mark_trans (Fixture *fixture, gconstpointer pData)
 {
-    GList *splits = NULL;
-
-    for (splits = (fixture->txn)->splits; splits; splits = splits->next)
+    for (Split *sp : (fixture->txn)->splits)
     {
-        if (!splits->data) continue;
-        g_assert_true (!qof_instance_get_dirty_flag (splits->data));
-        check_split_dirty (static_cast<Split*>(splits->data), FALSE);
+        if (!sp) continue;
+        g_assert_true (!qof_instance_get_dirty_flag (sp));
+        check_split_dirty (sp, FALSE);
     }
     fixture->func->mark_trans (fixture->txn);
     g_assert_true (!qof_instance_get_dirty_flag (fixture->txn));
-    for (splits = (fixture->txn)->splits; splits; splits = splits->next)
+    for (Split *sp : (fixture->txn)->splits)
     {
-        if (!splits->data) continue;
-        g_assert_true (!qof_instance_get_dirty_flag (splits->data));
-        check_split_dirty (static_cast<Split*>(splits->data), TRUE);
+        if (!sp) continue;
+        g_assert_true (!qof_instance_get_dirty_flag (sp));
+        check_split_dirty (sp, TRUE);
     }
 }
 /* gen_event_trans
@@ -310,7 +310,7 @@ void gen_event_trans (Transaction *trans)// Local: 2:0:0
 static void
 test_gen_event_trans (Fixture *fixture, gconstpointer pData)
 {
-    auto split = static_cast<Split*>(fixture->txn->splits->data);
+    auto split = fixture->txn->splits.front ();
     GNCLot *lot = gnc_lot_new (qof_instance_get_book (QOF_INSTANCE (fixture->txn)));
     TestSignal sig1 = test_signal_new (QOF_INSTANCE (fixture->acc1),
                                        GNC_EVENT_ITEM_CHANGED, split);
@@ -338,7 +338,7 @@ test_gnc_transaction_init ()
     g_assert_cmpstr (txn->num, ==, "");
     g_assert_cmpstr (txn->description, ==, "");
     g_assert_true (txn->common_currency == NULL);
-    g_assert_true (txn->splits == NULL);
+    g_assert_true (txn->splits.empty ());
     g_assert_cmpint (txn->date_entered, ==, 0);
     g_assert_cmpint (txn->date_posted, ==, 0);
     g_assert_cmpint (txn->marker, ==, 0);
@@ -361,10 +361,10 @@ test_gnc_transaction_dispose ()
     gnc_commodity *c_ref = curr;
     g_object_add_weak_pointer (G_OBJECT (split), (gpointer*) &s_ref);
     g_object_add_weak_pointer (G_OBJECT (curr), (gpointer*) &c_ref);
-    txn->splits = g_list_append (txn->splits, split);
+    txn->splits.push_back (split);
     txn->common_currency = curr;
 
-    g_assert_true (txn->splits != NULL);
+    g_assert_true (!txn->splits.empty ());
     g_assert_true (s_ref != NULL);
     g_assert_true (c_ref != NULL);
 
@@ -373,7 +373,7 @@ test_gnc_transaction_dispose ()
      * txn->curr would be null and all of the splits would be destroyed,
      * so all of these would be equal instead of unequal.
      */
-    g_assert_true (txn->splits != NULL);
+    g_assert_true (!txn->splits.empty ());
     g_assert_true (txn->common_currency != NULL);
     g_assert_true (s_ref != NULL);
     g_assert_true (c_ref != NULL);
@@ -492,11 +492,10 @@ test_xaccTransSortSplits (Fixture *fixture, gconstpointer pData)
 {
     Transaction *txn = fixture->txn;
     QofBook *book = qof_instance_get_book (QOF_INSTANCE (txn));
-    auto split1 = static_cast<Split*>(txn->splits->data);
-    auto split2 = static_cast<Split*>(txn->splits->next->data);
+    auto split1 = txn->splits[0];
+    auto split2 = txn->splits[1];
     Split *split[3];
     guint i;
-    GList *node;
     gnc_numeric values[3];
 
     values[0] = gnc_numeric_create (100, 240);
@@ -512,29 +511,19 @@ test_xaccTransSortSplits (Fixture *fixture, gconstpointer pData)
         xaccSplitSetParent (split[i], txn);
     }
 
-    node = txn->splits;
-    g_assert_true (node->data == split1);
-    node = g_list_next (node);
-    g_assert_true (node->data == split2);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[0]);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[1]);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[2]);
+    g_assert_true (txn->splits[0] == split1);
+    g_assert_true (txn->splits[1] == split2);
+    g_assert_true (txn->splits[2] == split[0]);
+    g_assert_true (txn->splits[3] == split[1]);
+    g_assert_true (txn->splits[4] == split[2]);
 
     xaccTransSortSplits (txn);
 
-    node = txn->splits;
-    g_assert_true (node->data == split1);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[0]);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[1]);
-    node = g_list_next (node);
-    g_assert_true (node->data == split2);
-    node = g_list_next (node);
-    g_assert_true (node->data == split[2]);
+    g_assert_true (txn->splits[0] == split1);
+    g_assert_true (txn->splits[1] == split[0]);
+    g_assert_true (txn->splits[2] == split[1]);
+    g_assert_true (txn->splits[3] == split2);
+    g_assert_true (txn->splits[4] == split[2]);
 
     xaccTransCommitEdit (txn);
 }
@@ -549,7 +538,6 @@ test_dupe_trans (Fixture *fixture, gconstpointer pData)
     time64 entered = gnc_dmy2time64 (14, 7, 2011);
     Transaction *newtxn = NULL, *oldtxn = fixture->txn;
     QofBook *old_book = qof_instance_get_book (QOF_INSTANCE (oldtxn));
-    GList *newnode, *oldnode = oldtxn->splits;
 
     oldtxn->date_posted = posted;
     oldtxn->date_entered = entered;
@@ -560,16 +548,12 @@ test_dupe_trans (Fixture *fixture, gconstpointer pData)
 
     g_assert_cmpstr (newtxn->num, ==, oldtxn->num);
     g_assert_cmpstr (newtxn->description, ==, oldtxn->description);
-    for (newnode = newtxn->splits; newnode && oldnode;
-            newnode = g_list_next (newnode))
+    g_assert_cmpuint (newtxn->splits.size (), ==, oldtxn->splits.size ());
+    for (size_t i = 0; i < newtxn->splits.size (); i++)
     {
-        g_assert_true (xaccSplitEqual (static_cast<Split*>(newnode->data),
-                                  static_cast<Split*>(oldnode->data),
+        g_assert_true (xaccSplitEqual (newtxn->splits[i], oldtxn->splits[i],
                                   TRUE, FALSE, TRUE));
-        oldnode = g_list_next (oldnode);
     }
-    g_assert_true (newnode == NULL);
-    g_assert_true (oldnode == NULL);
     g_assert_true (newtxn->date_posted == posted);
     g_assert_true (newtxn->date_entered == entered);
     g_assert_true (qof_instance_version_cmp (QOF_INSTANCE (newtxn),
@@ -595,7 +579,6 @@ test_xaccTransClone (Fixture *fixture, gconstpointer pData)
     time64 entered = gnc_dmy2time64 (14, 7, 2011);
     Transaction *newtxn = NULL, *oldtxn = fixture->txn;
     QofBook *old_book = qof_instance_get_book (QOF_INSTANCE (oldtxn));
-    GList *newnode, *oldnode;
 
     oldtxn->date_posted = posted;
     oldtxn->date_entered = entered;
@@ -610,17 +593,12 @@ test_xaccTransClone (Fixture *fixture, gconstpointer pData)
     xaccTransSortSplits (newtxn);
     xaccTransSortSplits (oldtxn);
 
-    oldnode = oldtxn->splits;
-    for (newnode = newtxn->splits; newnode && oldnode;
-            newnode = g_list_next (newnode))
+    g_assert_cmpuint (newtxn->splits.size (), ==, oldtxn->splits.size ());
+    for (size_t i = 0; i < newtxn->splits.size (); i++)
     {
-        g_assert_true (xaccSplitEqual (static_cast<Split*>(newnode->data),
-                                  static_cast<Split*>(oldnode->data),
+        g_assert_true (xaccSplitEqual (newtxn->splits[i], oldtxn->splits[i],
                                   FALSE, FALSE, FALSE));
-        oldnode = g_list_next (oldnode);
     }
-    g_assert_true (newnode == NULL);
-    g_assert_true (oldnode == NULL);
     g_assert_true (newtxn->date_posted == posted);
     g_assert_true (newtxn->date_entered == entered);
     g_assert_true (qof_instance_version_cmp (QOF_INSTANCE (newtxn),
@@ -708,9 +686,9 @@ test_xaccFreeTransaction (Fixture *fixture, gconstpointer pData)
 {
     Transaction *txn = fixture->txn;
     Transaction *orig = xaccMallocTransaction (qof_instance_get_book (QOF_INSTANCE (txn)));
-    auto split = static_cast<Split*>(txn->splits->data);
+    auto split = txn->splits.front ();
     auto txn_num = "321";
-    g_object_add_weak_pointer (G_OBJECT (txn->splits->data),
+    g_object_add_weak_pointer (G_OBJECT (split),
                                reinterpret_cast<void**>(&split));
     /* so the "free" doesn't, leaving the structure for us to test */
     g_object_ref (txn);
@@ -721,7 +699,6 @@ test_xaccFreeTransaction (Fixture *fixture, gconstpointer pData)
     fixture->func->xaccFreeTransaction (txn);
 
     g_assert_true (split == NULL);
-    g_assert_true (txn->splits == NULL);
     g_assert_cmpint (GPOINTER_TO_INT(txn->num), ==, 1);
     g_assert_true (txn->description == NULL);
     g_assert_cmpint (txn->date_entered, ==, 0);
@@ -1361,7 +1338,7 @@ test_destroy_gains (GainsFixture *fixture, gconstpointer pData)
      * function that isn't protected.
      */
     Fixture *base = &(fixture->base);
-    auto base_split = static_cast<Split*>(g_list_nth_data (base->txn->splits, 1));
+    auto base_split = base->txn->splits.at (1);
     xaccTransBeginEdit (fixture->gains_txn); /* Protect it from being actually destroyed */
     base->func->destroy_gains (base->txn);
     g_assert_true (qof_instance_get_destroying (QOF_INSTANCE (fixture->gains_txn)));
@@ -1378,10 +1355,10 @@ static void
 test_do_destroy (GainsFixture *fixture, gconstpointer pData)
 {
     Fixture *base = &(fixture->base);
-    auto base_split =  static_cast<Split*>(g_list_nth_data (base->txn->splits, 1));
+    auto base_split = base->txn->splits.at (1);
     TestSignal sig = test_signal_new (QOF_INSTANCE (base->txn),
                                       QOF_EVENT_DESTROY, NULL);
-    g_object_add_weak_pointer (G_OBJECT (base->txn->splits->data),
+    g_object_add_weak_pointer (G_OBJECT (base->txn->splits[0]),
                                reinterpret_cast<void**>(&base_split));
     g_object_ref (base->txn);
     g_object_ref (fixture->gains_txn);
@@ -1408,9 +1385,9 @@ static gboolean was_trans_emptied(Transaction *trans)// Local: 1:0:0 xaccTransCo
 static void
 test_was_trans_emptied (Fixture *fixture, gconstpointer pData)
 {
-    GList *list = fixture->txn->splits;
+    SplitsVec list = fixture->txn->splits;
     g_assert_true (!fixture->func->was_trans_emptied (fixture->txn));
-    fixture->txn->splits = NULL;
+    fixture->txn->splits.clear ();
     g_assert_true (fixture->func->was_trans_emptied (fixture->txn));
     /* Restore the list so teardown can free the splits */
     fixture->txn->splits = list;
@@ -1457,7 +1434,7 @@ test_trans_cleanup_commit (Fixture *fixture, gconstpointer pData)
     QofBook *book = qof_instance_get_book (QOF_INSTANCE (fixture->txn));
     auto destr_split = xaccMallocSplit (book);
     auto bogus_split = xaccMallocSplit (book);
-    auto split0 = static_cast<Split*>(fixture->txn->splits->data);
+    auto split0 = fixture->txn->splits.front ();
     Account *acct0 = split0->acc;
     Transaction *orig = NULL;
     auto sig_d_remove = test_signal_new (QOF_INSTANCE (destr_split),
@@ -1477,14 +1454,14 @@ test_trans_cleanup_commit (Fixture *fixture, gconstpointer pData)
     orig = fixture->txn->orig;
     g_object_ref (orig);
     /* Check the txn-isn't-the-parent path */
-    fixture->txn->splits = g_list_prepend (fixture->txn->splits, destr_split);
-    fixture->txn->splits = g_list_prepend (fixture->txn->splits, bogus_split);
+    fixture->txn->splits.insert (fixture->txn->splits.begin (), destr_split);
+    fixture->txn->splits.insert (fixture->txn->splits.begin (), bogus_split);
     qof_instance_set_dirty (QOF_INSTANCE (destr_split));
     qof_instance_set_dirty (QOF_INSTANCE (bogus_split));
     qof_instance_set_destroying (QOF_INSTANCE (destr_split), TRUE);
     /*Reverse the splits list so we can check later that it got sorted */
-    fixture->txn->splits = g_list_reverse (fixture->txn->splits);
-    g_assert_true (fixture->txn->splits->data != split0);
+    std::reverse (fixture->txn->splits.begin (), fixture->txn->splits.end ());
+    g_assert_true (fixture->txn->splits.front () != split0);
     fixture->func->trans_cleanup_commit (QOF_INSTANCE(fixture->txn));
 
     g_assert_cmpint (test_signal_return_hits (sig_d_remove), ==, 1);
@@ -1493,10 +1470,12 @@ test_trans_cleanup_commit (Fixture *fixture, gconstpointer pData)
     g_assert_cmpint (test_signal_return_hits (sig_b_modify), ==, 0);
     g_assert_cmpint (test_signal_return_hits (sig_t_modify), ==, 1);
     g_assert_cmpint (test_signal_return_hits (sig_a_changed), ==, 1);
-    g_assert_cmpint (g_list_index (fixture->txn->splits, destr_split), ==, -1);
-    g_assert_cmpint (g_list_index (fixture->txn->splits, bogus_split), ==, -1);
+    g_assert_true (std::find (fixture->txn->splits.begin (), fixture->txn->splits.end (),
+                              destr_split) == fixture->txn->splits.end ());
+    g_assert_true (std::find (fixture->txn->splits.begin (), fixture->txn->splits.end (),
+                              bogus_split) == fixture->txn->splits.end ());
     g_assert_true (fixture->txn->orig == NULL);
-    g_assert_true (fixture->txn->splits->data == split0);
+    g_assert_true (fixture->txn->splits.front () == split0);
     g_assert_true (qof_instance_get_destroying (destr_split));
     /* Note that the function itself aborts if qof_instance_editlevel != 0 */
 
@@ -1504,8 +1483,8 @@ test_trans_cleanup_commit (Fixture *fixture, gconstpointer pData)
     qof_instance_increase_editlevel (fixture->txn);
     destr_split->parent = fixture->txn;
     bogus_split->parent = fixture->txn;
-    fixture->txn->splits = g_list_prepend (fixture->txn->splits, destr_split);
-    fixture->txn->splits = g_list_prepend (fixture->txn->splits, bogus_split);
+    fixture->txn->splits.insert (fixture->txn->splits.begin (), destr_split);
+    fixture->txn->splits.insert (fixture->txn->splits.begin (), bogus_split);
 
     fixture->txn->orig = orig;
     orig->num = fixture->txn->num;
@@ -1518,8 +1497,11 @@ test_trans_cleanup_commit (Fixture *fixture, gconstpointer pData)
     g_assert_cmpint (test_signal_return_hits (sig_b_modify), ==, 1);
     g_assert_cmpint (test_signal_return_hits (sig_t_modify), ==, 2);
     g_assert_cmpint (test_signal_return_hits (sig_a_changed), ==, 2);
-    g_assert_cmpint (g_list_index (fixture->txn->splits, destr_split), ==, -1);
-    g_assert_cmpint (g_list_index (fixture->txn->splits, bogus_split), ==, 0);
+    g_assert_true (std::find (fixture->txn->splits.begin (), fixture->txn->splits.end (),
+                              destr_split) == fixture->txn->splits.end ());
+    g_assert_cmpint (std::distance (fixture->txn->splits.begin (),
+                     std::find (fixture->txn->splits.begin (), fixture->txn->splits.end (),
+                               bogus_split)), ==, 0);
     g_assert_cmpint (GPOINTER_TO_INT(orig->num), ==, 1);
     test_destroy (orig);
 
@@ -1582,11 +1564,10 @@ test_xaccTransCommitEdit (void)
     /* Signals make sure that trans_cleanup_commit got called */
     g_assert_cmpint (test_signal_return_hits (sig_1_modify), ==, 1);
     g_assert_cmpint (test_signal_return_hits (sig_2_modify), ==, 1);
-    g_assert_cmpint (g_list_length (txn->splits), ==, 3);
+    g_assert_cmpint (txn->splits.size (), ==, 3);
 
     xaccTransBeginEdit (txn);
-    g_list_free (txn->splits);
-    txn->splits = NULL;
+    txn->splits.clear ();
     xaccTransCommitEdit (txn);
     g_assert_cmpint (test_signal_return_hits (sig_txn_destroy), ==, 1);
 
@@ -1619,8 +1600,8 @@ test_xaccTransRollbackEdit (Fixture *fixture, gconstpointer pData)
     auto sig_account = test_signal_new (QOF_INSTANCE (fixture->acc1),
             GNC_EVENT_ITEM_CHANGED, NULL);
     auto mbe = static_cast<TransMockBackend*>(qof_book_get_backend (book));
-    auto split_00 = static_cast<Split*>(txn->splits->data);
-    auto split_01 = static_cast<Split*>(txn->splits->next->data);
+    auto split_00 = txn->splits[0];
+    auto split_01 = txn->splits[1];
     auto split_02 = xaccMallocSplit (book);
 
     xaccTransBeginEdit (txn);
@@ -1634,14 +1615,14 @@ test_xaccTransRollbackEdit (Fixture *fixture, gconstpointer pData)
     txn->inst.kvp_data = NULL;
     txn->date_entered = new_entered;
     txn->date_posted = new_post;
-    txn->splits->data = split_01;
-    txn->splits->next->data = split_00;
+    txn->splits[0] = split_01;
+    txn->splits[1] = split_00;
     qof_instance_set_dirty (QOF_INSTANCE (split_01));
     xaccSplitSetParent (split_02, txn);
     g_object_ref (split_02);
-    auto split_10 = xaccDupeSplit(static_cast<Split*>(orig->splits->data));
+    auto split_10 = xaccDupeSplit(orig->splits[0]);
     g_object_ref (split_10);
-    auto split_11 = xaccDupeSplit(static_cast<Split*>(orig->splits->next->data));
+    auto split_11 = xaccDupeSplit(orig->splits[1]);
     g_object_ref (split_11);
     qof_instance_increase_editlevel (QOF_INSTANCE (txn)); /* So it's 2 */
     xaccTransRollbackEdit (txn);
@@ -1660,11 +1641,11 @@ test_xaccTransRollbackEdit (Fixture *fixture, gconstpointer pData)
     g_assert_true (txn->date_posted == orig_post);
     g_assert_true (txn->date_entered == orig_entered);
     g_assert_cmpuint (test_signal_return_hits (sig_account), ==, 1);
-    g_assert_cmpuint (g_list_length (txn->splits), ==, 2);
+    g_assert_cmpuint (txn->splits.size (), ==, 2);
     g_assert_cmpint (GPOINTER_TO_INT(split_02->memo), ==, 1);
-    g_assert_true (xaccSplitEqual (static_cast<Split*>(txn->splits->data), split_10,
+    g_assert_true (xaccSplitEqual (txn->splits[0], split_10,
                               FALSE, FALSE, FALSE));
-    g_assert_true (xaccSplitEqual (static_cast<Split*>(txn->splits->next->data),
+    g_assert_true (xaccSplitEqual (txn->splits[1],
                               split_10, FALSE, FALSE, FALSE));
     g_assert_cmpstr (mbe->m_last_call.c_str(), ==, "rollback");
     g_assert_cmpuint (qof_instance_get_editlevel (QOF_INSTANCE (txn)), ==, 0);
@@ -1922,7 +1903,6 @@ test_xaccTransVoid (Fixture *fixture, gconstpointer pData)
     auto txn_notes = g_strdup (frame->get_slot({trans_notes_str})->get<const char*>());
     time64 now = gnc_time(NULL);
     char iso8601_str[ISO_DATELENGTH + 1] = "";
-    GList *split = NULL;
 
     xaccTransVoid (fixture->txn, void_reason);
     g_assert_cmpstr (frame->get_slot({trans_notes_str})->get<const char*>(), ==,
@@ -1936,10 +1916,10 @@ test_xaccTransVoid (Fixture *fixture, gconstpointer pData)
                      iso8601_str);
     g_assert_cmpstr (frame->get_slot({TRANS_READ_ONLY_REASON})->get<const char*>(),
                      ==, "Transaction Voided");
-    for (split = fixture->txn->splits; split; split=g_list_next (split))
+    for (Split *split : fixture->txn->splits)
     {
-        g_assert_true (gnc_numeric_zero_p (((Split*)(split->data))->value));
-        g_assert_true (gnc_numeric_zero_p (((Split*)(split->data))->amount));
+        g_assert_true (gnc_numeric_zero_p (split->value));
+        g_assert_true (gnc_numeric_zero_p (split->amount));
     }
 
     xaccTransUnvoid (fixture->txn);
@@ -1950,10 +1930,10 @@ test_xaccTransVoid (Fixture *fixture, gconstpointer pData)
     g_assert_true (frame->get_slot({void_reason_str}) == NULL);
     g_assert_true (frame->get_slot({void_time_str}) == NULL);
     g_assert_true (frame->get_slot({TRANS_READ_ONLY_REASON}) == NULL);
-    for (split = fixture->txn->splits; split; split=g_list_next (split))
+    for (Split *split : fixture->txn->splits)
     {
-        g_assert_true (!gnc_numeric_zero_p (((Split*)(split->data))->value));
-        g_assert_true (!gnc_numeric_zero_p (((Split*)(split->data))->amount));
+        g_assert_true (!gnc_numeric_zero_p (split->value));
+        g_assert_true (!gnc_numeric_zero_p (split->amount));
     }
 
     g_free (txn_notes);
@@ -1968,22 +1948,17 @@ test_xaccTransReverse (Fixture *fixture, gconstpointer pData)
 {
     Transaction *rev = xaccTransReverse (fixture->txn);
     auto frame = fixture->txn->inst.kvp_data;
-    GList *orig_splits = NULL, *rev_splits = NULL;
 
     g_assert_true (guid_equal (frame->get_slot({TRANS_REVERSED_BY})->get<GncGUID*>(),
                           xaccTransGetGUID (rev)));
 
     g_assert_true (!qof_instance_is_dirty (QOF_INSTANCE (rev))); //Cleared by commit
-    g_assert_cmpint (g_list_length (fixture->txn->splits), ==,
-                     g_list_length (rev->splits));
-    for (orig_splits = fixture->txn->splits,
-            rev_splits = g_list_reverse (rev->splits);
-            orig_splits && rev_splits;
-            orig_splits = g_list_next (orig_splits),
-            rev_splits = g_list_next (rev_splits))
+    g_assert_cmpint (fixture->txn->splits.size (), ==, rev->splits.size ());
+    std::reverse (rev->splits.begin (), rev->splits.end ());
+    for (size_t i = 0; i < fixture->txn->splits.size () && i < rev->splits.size (); i++)
     {
-        auto orig_split = static_cast<Split*>(orig_splits->data);
-        auto rev_split = static_cast<Split*>(rev_splits->data);
+        auto orig_split = fixture->txn->splits[i];
+        auto rev_split = rev->splits[i];
         g_assert_true (gnc_numeric_equal (orig_split->amount,
                                      gnc_numeric_neg (rev_split->amount)));
         g_assert_true (gnc_numeric_equal (orig_split->value,
@@ -2007,7 +1982,7 @@ static void
 test_xaccTransScrubGainsDate_no_dirty (GainsFixture *fixture,
                                        gconstpointer pData)
 {
-    auto base_split = static_cast<Split *>(g_list_nth_data (fixture->base.txn->splits, 1));
+    auto base_split = fixture->base.txn->splits.at (1);
     auto gains_split = base_split->gains_split;
 
     base_split->gains = GAINS_STATUS_GAINS;
@@ -2025,7 +2000,7 @@ static void
 test_xaccTransScrubGainsDate_base_dirty (GainsFixture *fixture,
         gconstpointer pData)
 {
-    auto base_split = static_cast<Split *>(g_list_nth_data (fixture->base.txn->splits, 1));
+    auto base_split = fixture->base.txn->splits.at (1);
     auto gains_split = base_split->gains_split;
 
     base_split->gains = GAINS_STATUS_GAINS | GAINS_STATUS_DATE_DIRTY;
@@ -2043,7 +2018,7 @@ static void
 test_xaccTransScrubGainsDate_gains_dirty (GainsFixture *fixture,
         gconstpointer pData)
 {
-    auto base_split = static_cast<Split*>(g_list_nth_data (fixture->base.txn->splits, 1));
+    auto base_split = fixture->base.txn->splits.at (1);
     auto gains_split = base_split->gains_split;
 
     base_split->gains = GAINS_STATUS_GAINS;

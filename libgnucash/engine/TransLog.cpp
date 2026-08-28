@@ -221,7 +221,6 @@ xaccCloseLog (void)
 void
 xaccTransWriteLog (Transaction *trans, char flag)
 {
-    GList *node;
     char trans_guid_str[GUID_ENCODING_LENGTH + 1];
     char split_guid_str[GUID_ENCODING_LENGTH + 1];
     const char *trans_notes;
@@ -241,9 +240,8 @@ xaccTransWriteLog (Transaction *trans, char flag)
     trans_notes = xaccTransGetNotes(trans);
     trans_log_stream << "===== START\n";
 
-    for (node = trans->splits; node; node = node->next)
+    for (Split *split : trans->splits)
     {
-        Split *split = GNC_SPLIT(node->data);
         const char * accname = "";
         char acc_guid_str[GUID_ENCODING_LENGTH + 1];
         gnc_numeric amt, val;

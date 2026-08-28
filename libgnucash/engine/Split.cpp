@@ -43,6 +43,7 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#include <algorithm>
 
 #include "qof.h"
 #include "qofbook.h"
@@ -1906,8 +1907,8 @@ xaccSplitSetParent(Split *s, Transaction *t)
         xaccSplitSetValue(s, xaccSplitGetValue(s));
 
         /* add ourselves to the new transaction's list of pending splits. */
-        if (nullptr == g_list_find(t->splits, s))
-            t->splits = g_list_append(t->splits, s);
+        if (std::find (t->splits.begin(), t->splits.end(), s) == t->splits.end())
+            t->splits.push_back (s);
 
         ed.idx = -1; /* unused */
         qof_event_gen(&t->inst, GNC_EVENT_ITEM_ADDED, &ed);

@@ -47,6 +47,7 @@
 
 #include <time.h>
 #include <glib.h>
+#include <vector>
 
 #include "gnc-engine.h"   /* for typedefs */
 #include "SplitP.hpp"
@@ -95,7 +96,7 @@ struct transaction_s
      * splits can be valued.  */
     gnc_commodity *common_currency;
 
-    GList * splits; /* list of splits */
+    std::vector<Split*> splits; /* list of split pointers */
 
     /* marker is used to track the progress of transaction traversals.
      * 0 is never a legitimate marker value, so we can tell is we hit
