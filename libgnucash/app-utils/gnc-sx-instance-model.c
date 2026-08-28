@@ -1037,6 +1037,7 @@ gnc_sx_instance_model_remove_sx_instances(GncSxInstanceModel *model, SchedXactio
 
     model->sx_instance_list = g_list_remove_link(model->sx_instance_list, instance_link);
     gnc_sx_instances_free((GncSxInstances*)instance_link->data);
+    g_list_free_1 (instance_link);
 }
 
 static void
