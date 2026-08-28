@@ -525,8 +525,8 @@ delete_splits (GncSqlBackend* sql_be, Transaction* pTx)
     split_info.be = sql_be;
     split_info.is_ok = TRUE;
 
-    g_list_foreach (xaccTransGetSplitList (pTx), delete_split_slots_cb,
-                    &split_info);
+    for (Split *s : pTx->splits)
+        delete_split_slots_cb (s, &split_info);
 
     return split_info.is_ok;
 }

@@ -104,35 +104,39 @@ gnc_split_register_get_rbaln (VirtualLocation virt_loc, gpointer user_data,
         trans = xaccSplitGetParent (split);
 
         i = 1;
-        for (node = xaccTransGetSplitList (trans); node; node = node->next)
         {
-            Split* secondary = node->data;
-
-            if (!xaccTransStillHasSplit (trans, secondary))
-              continue;
-
-            i++;
-
-            if (subaccounts)
+            GList *split_list = xaccTransGetSplitList (trans);
+            for (node = split_list; node; node = node->next)
             {
-                /* Add up the splits that belong to the transaction if they are
-                 * from the lead account or one of the subaccounts. */
-                account = xaccSplitGetAccount (secondary);
+                Split* secondary = node->data;
 
-                for (child = children; child; child = child->next)
+                if (!xaccTransStillHasSplit (trans, secondary))
+                  continue;
+
+                i++;
+
+                if (subaccounts)
                 {
-                    if (account == child->data)
+                    /* Add up the splits that belong to the transaction if they are
+                     * from the lead account or one of the subaccounts. */
+                    account = xaccSplitGetAccount (secondary);
+
+                    for (child = children; child; child = child->next)
                     {
-                        balance = gnc_numeric_add_fixed (balance, xaccSplitGetAmount (secondary));
-                        break;
+                        if (account == child->data)
+                        {
+                            balance = gnc_numeric_add_fixed (balance, xaccSplitGetAmount (secondary));
+                            break;
+                        }
                     }
                 }
+                else
+                {
+                    if (account == xaccSplitGetAccount (secondary))
+                        balance = gnc_numeric_add_fixed (balance, xaccSplitGetAmount (secondary));
+                }
             }
-            else
-            {
-                if (account == xaccSplitGetAccount (secondary))
-                    balance = gnc_numeric_add_fixed (balance, xaccSplitGetAmount (secondary));
-            }
+            g_list_free (split_list);
         }
         virt_loc.vcell_loc.virt_row += i;
     }
@@ -2132,8 +2136,10 @@ static gboolean reg_trans_has_reconciled_splits (SplitRegister* reg,
                                                  Transaction* trans)
 {
     GList* node;
+    GList* split_list = xaccTransGetSplitList (trans);
+    gboolean found = FALSE;
 
-    for (node = xaccTransGetSplitList (trans); node; node = node->next)
+    for (node = split_list; node; node = node->next)
     {
         Split* split = node->data;
 
@@ -2142,10 +2148,14 @@ static gboolean reg_trans_has_reconciled_splits (SplitRegister* reg,
 
         if ((xaccSplitGetReconcile (split) == YREC) &&
             (g_list_index (reg->unrecn_splits, split) == -1))
-            return TRUE;
+        {
+            found = TRUE;
+            break;
+        }
     }
+    g_list_free (split_list);
 
-    return FALSE;
+    return found;
 }
 
 static gboolean
@@ -2209,8 +2219,9 @@ gnc_split_register_confirm (VirtualLocation virt_loc, gpointer user_data)
         GList* acc_g_list = NULL;
         gchar* acc_list = NULL;
         gchar* message_format;
+        GList* split_list = xaccTransGetSplitList (trans);
 
-        for (GList *node = xaccTransGetSplitList (trans); node; node = node->next)
+        for (GList *node = split_list; node; node = node->next)
         {
             Split* split = node->data;
 
@@ -2223,6 +2234,7 @@ gnc_split_register_confirm (VirtualLocation virt_loc, gpointer user_data)
                 acc_g_list = g_list_prepend (acc_g_list, name);
             }
         }
+        g_list_free (split_list);
         acc_list = gnc_g_list_stringjoin (acc_g_list, "\n");
         title = _ ("Change transaction containing a reconciled split?");
         message_format =

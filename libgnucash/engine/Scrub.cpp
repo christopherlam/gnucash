@@ -400,9 +400,14 @@ xaccTransScrubSplits (Transaction *trans)
 
     bool must_scrub = false;
 
-    for (GList *n = xaccTransGetSplitList (trans); !must_scrub && n; n = g_list_next (n))
-        if (split_scrub_or_dry_run (GNC_SPLIT(n->data), true))
+    for (Split *s : trans->splits)
+    {
+        if (split_scrub_or_dry_run (s, true))
+        {
             must_scrub = true;
+            break;
+        }
+    }
 
     if (!must_scrub)
         return;
@@ -410,8 +415,8 @@ xaccTransScrubSplits (Transaction *trans)
     xaccTransBeginEdit(trans);
     /* The split scrub expects the transaction to have a currency! */
 
-    for (GList *n = xaccTransGetSplitList (trans); n; n = g_list_next (n))
-        xaccSplitScrub (GNC_SPLIT(n->data));
+    for (Split *s : trans->splits)
+        xaccSplitScrub (s);
 
     xaccTransCommitEdit(trans);
 }

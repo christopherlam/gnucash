@@ -515,7 +515,7 @@ void gnc_float_txn_append_float_split (FloatingTxn *ft, FloatingSplit *fs)
    a representation of it as a floating_txn. */
 FloatingTxn *gnc_txn_to_float_txn (Transaction *txn, gboolean use_cut_semantics, gboolean is_template)
 {
-    GList *iter;
+    GList *iter, *split_list;
 
     FloatingTxn *ft = g_new0 (FloatingTxn, 1);
 
@@ -531,7 +531,8 @@ FloatingTxn *gnc_txn_to_float_txn (Transaction *txn, gboolean use_cut_semantics,
     ft->m_notes = CACHE_INSERT (xaccTransGetNotes (txn));
     ft->m_doclink = CACHE_INSERT (xaccTransGetDocLink (txn));
 
-    for (iter = xaccTransGetSplitList (txn); iter ; iter = iter->next)
+    split_list = xaccTransGetSplitList (txn);
+    for (iter = split_list; iter ; iter = iter->next)
     {
         Split *split = iter->data;
         if (split && xaccTransStillHasSplit (txn, split))
@@ -540,6 +541,7 @@ FloatingTxn *gnc_txn_to_float_txn (Transaction *txn, gboolean use_cut_semantics,
             ft->m_splits = g_list_prepend (ft->m_splits, fs);
         }
     }
+    g_list_free (split_list);
     ft->m_splits = g_list_reverse (ft->m_splits);
 
     return ft;

@@ -1191,16 +1191,21 @@ gnc_split_register_change_blank_split_ref (SplitRegister* reg, Split* split)
     Transaction* trans = xaccSplitGetParent (split);
 
     // loop through splitlist looking for splits other than the blank_split
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
     {
-        Split *s = n->data;
-        if (s != current_blank_split && xaccTransStillHasSplit (trans, s))
+        GList *split_list = xaccTransGetSplitList (trans);
+        GList *n;
+        for (n = split_list; n; n = n->next)
         {
-            if (blank_split_account == xaccSplitGetAccount (s))
-                pref_split = s;  // prefer same account
-            else
-                other_split = s; // any other split
+            Split *s = n->data;
+            if (s != current_blank_split && xaccTransStillHasSplit (trans, s))
+            {
+                if (blank_split_account == xaccSplitGetAccount (s))
+                    pref_split = s;  // prefer same account
+                else
+                    other_split = s; // any other split
+            }
         }
+        g_list_free (split_list);
     }
     // now change the saved blank split reference
     if (pref_split != NULL)

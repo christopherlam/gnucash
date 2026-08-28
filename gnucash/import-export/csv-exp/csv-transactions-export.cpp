@@ -37,6 +37,7 @@
 #include "gnc-ui-util.h"
 #include "Query.h"
 #include "Transaction.h"
+#include "Transaction.hpp"
 #include "engine-helpers.h"
 #include "qofbookslots.h"
 #include "guid.hpp"
@@ -297,10 +298,10 @@ export_query_splits (CsvExportInfo *info, bool is_trading_acct,
         }
 
         /* Loop through the list of splits for the Transaction */
-        for (auto node = xaccTransGetSplitList (trans); !info->failed && node;
-             node = node->next)
+        for (auto t_split : xaccTransGetSplits (trans))
         {
-            auto t_split{static_cast<Split*>(node->data)};
+            if (info->failed)
+                break;
 
             // Only export trading splits if exporting a trading account
             Account *tsplit_acc = xaccSplitGetAccount (t_split);

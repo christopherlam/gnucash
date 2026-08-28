@@ -47,6 +47,7 @@
 #include "import-main-matcher.h"
 
 #include "Account.hpp"
+#include "Transaction.hpp"
 #include "dialog-transfer.h"
 #include "dialog-utils.h"
 #include "gnc-glib-utils.h"
@@ -563,8 +564,8 @@ on_matcher_ok_clicked (GtkButton *button, GNCImportMainMatcher *info)
         Split* first_split = gnc_import_TransInfo_get_fsplit (trans_info);
         Transaction *trans = xaccSplitGetParent (first_split);
 
-        for (GList *n = xaccTransGetSplitList (trans); n; n = g_list_next (n))
-            acc_begin_edit (&accounts_modified, xaccSplitGetAccount (static_cast<Split*>(n->data)));
+        for (auto s : xaccTransGetSplits (trans))
+            acc_begin_edit (&accounts_modified, xaccSplitGetAccount (s));
 
         // Allow the backend to know if the Append checkbox is ticked or unticked
         // by propagating info->append_text to every trans_info->append_text
@@ -1930,10 +1931,10 @@ static gchar *
 get_peer_acct_names (Split *split)
 {
     GList *names = NULL, *accounts_seen = NULL;
-    for (GList *n = xaccTransGetSplitList (xaccSplitGetParent (split)); n; n = n->next)
+    for (auto s : xaccTransGetSplits (xaccSplitGetParent (split)))
     {
-        Account *account = xaccSplitGetAccount (static_cast<Split*>(n->data));
-        if ((n->data == split) ||
+        Account *account = xaccSplitGetAccount (s);
+        if ((s == split) ||
             (xaccAccountGetType (account) == ACCT_TYPE_TRADING) ||
             (g_list_find (accounts_seen, account)))
             continue;

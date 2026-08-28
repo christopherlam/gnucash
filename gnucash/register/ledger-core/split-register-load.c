@@ -206,6 +206,7 @@ gnc_split_register_add_transaction (SplitRegister* reg,
                                     VirtualCellLocation* vcell_loc)
 {
     GList* node;
+    GList* split_list;
 
     g_return_if_fail (reg);
     g_return_if_fail (vcell_loc);
@@ -220,7 +221,8 @@ gnc_split_register_add_transaction (SplitRegister* reg,
 
     /* Continue setting up virtual cells in a column, using a row for each
      * split in the transaction. */
-    for (node = xaccTransGetSplitList (trans); node; node = node->next)
+    split_list = xaccTransGetSplitList (trans);
+    for (node = split_list; node; node = node->next)
     {
         Split* secondary = node->data;
 
@@ -233,6 +235,7 @@ gnc_split_register_add_transaction (SplitRegister* reg,
                              visible_splits, TRUE, *vcell_loc);
         vcell_loc->virt_row++;
     }
+    g_list_free (split_list);
 
     /* If requested, add an empty split row at the end. */
     if (add_empty)
@@ -269,16 +272,21 @@ add_quickfill_completions (TableLayout* layout, Transaction* trans,
             (NumCell*) gnc_table_layout_get_cell (layout, NUM_CELL),
             gnc_get_num_action (trans, split));
 
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
     {
-        Split *s = n->data;
+        GList *split_list = xaccTransGetSplitList (trans);
+        GList *n;
+        for (n = split_list; n; n = n->next)
+        {
+            Split *s = n->data;
 
-        if (!xaccTransStillHasSplit (trans, s))
-            continue;
+            if (!xaccTransStillHasSplit (trans, s))
+                continue;
 
-        gnc_quickfill_cell_add_completion (
-            (QuickFillCell*) gnc_table_layout_get_cell (layout, MEMO_CELL),
-            xaccSplitGetMemo (s));
+            gnc_quickfill_cell_add_completion (
+                (QuickFillCell*) gnc_table_layout_get_cell (layout, MEMO_CELL),
+                xaccSplitGetMemo (s));
+        }
+        g_list_free (split_list);
     }
 }
 
@@ -596,7 +604,8 @@ gnc_split_register_load (SplitRegister* reg, GList* slist,
     // list we're about to load.
     if (pending_trans != NULL)
     {
-        for (node = xaccTransGetSplitList (pending_trans); node; node = node->next)
+        GList *pending_split_list = xaccTransGetSplitList (pending_trans);
+        for (node = pending_split_list; node; node = node->next)
         {
             Split* pending_split = (Split*)node->data;
             if (!xaccTransStillHasSplit (pending_trans, pending_split)) continue;
@@ -615,6 +624,7 @@ gnc_split_register_load (SplitRegister* reg, GList* slist,
             }
             slist = g_list_append (slist, pending_split);
         }
+        g_list_free (pending_split_list);
     }
 
     if (multi_line)

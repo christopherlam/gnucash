@@ -314,7 +314,7 @@ static gint
 _get_vars_helper(Transaction *txn, void *var_hash_data)
 {
     GHashTable *var_hash = (GHashTable*)var_hash_data;
-    GList *split_list;
+    GList *split_list, *node;
     Split *s;
     gchar *credit_formula = NULL;
     gchar *debit_formula = NULL;
@@ -326,14 +326,14 @@ _get_vars_helper(Transaction *txn, void *var_hash_data)
         return 1;
     }
 
-    for ( ; split_list; split_list = split_list->next)
+    for (node = split_list; node; node = node->next)
     {
         gnc_commodity *split_cmdty = NULL;
         GncGUID *acct_guid = NULL;
         Account *acct;
         gboolean split_is_marker = TRUE;
 
-        s = (Split*)split_list->data;
+        s = (Split*)node->data;
 
         qof_instance_get (QOF_INSTANCE (s),
 			  "sx-account", &acct_guid,
@@ -371,6 +371,7 @@ _get_vars_helper(Transaction *txn, void *var_hash_data)
             g_free (var_name);
         }
     }
+    g_list_free (split_list);
 
     return 0;
 }
@@ -1251,6 +1252,7 @@ get_transaction_currency(SxTxnCreationData *creation_data,
     gboolean err_flag = FALSE, txn_cmdty_in_splits = FALSE;
     gnc_commodity *txn_cmdty = xaccTransGetCurrency (template_txn);
     GList* txn_splits = xaccTransGetSplitList (template_txn);
+    GList* node;
     GList** creation_errors =
         creation_data ? creation_data->creation_errors : NULL;
 
@@ -1260,9 +1262,9 @@ get_transaction_currency(SxTxnCreationData *creation_data,
     else
         DEBUG("No template txn currency.");
 
-    for (;txn_splits; txn_splits = txn_splits->next)
+    for (node = txn_splits; node; node = node->next)
     {
-        Split* t_split = (Split*)txn_splits->data;
+        Split* t_split = (Split*)node->data;
         Account* split_account = NULL;
         gnc_commodity *split_cmdty = NULL;
 
@@ -1291,6 +1293,7 @@ get_transaction_currency(SxTxnCreationData *creation_data,
         if (!first_currency && gnc_commodity_is_currency (split_cmdty))
             first_currency = split_cmdty;
     }
+    g_list_free (txn_splits);
     if (err_flag)
     {
         g_critical("Error in SX transaction [%s], split missing account: "
@@ -1312,6 +1315,7 @@ create_each_transaction_helper(Transaction *template_txn, void *user_data)
 {
     Transaction *new_txn;
     GList *txn_splits, *template_splits;
+    GList *txn_splits_iter, *template_splits_iter;
     Split *copying_split;
     SxTxnCreationData *creation_data = (SxTxnCreationData*)user_data;
     SchedXaction *sx = creation_data->instance->parent->sx;
@@ -1350,6 +1354,8 @@ create_each_transaction_helper(Transaction *template_txn, void *user_data)
     {
         g_critical("transaction w/o splits for sx [%s]",
                    xaccSchedXactionGetName(sx));
+        g_list_free (template_splits);
+        g_list_free (txn_splits);
         xaccTransDestroy(new_txn);
         xaccTransCommitEdit(new_txn);
         return FALSE;
@@ -1357,15 +1363,18 @@ create_each_transaction_helper(Transaction *template_txn, void *user_data)
 
     if (txn_cmdty == NULL)
     {
+        g_list_free (template_splits);
+        g_list_free (txn_splits);
         xaccTransDestroy(new_txn);
         xaccTransCommitEdit(new_txn);
         return FALSE;
     }
     xaccTransSetCurrency(new_txn, txn_cmdty);
 
-    for (;
-         txn_splits && template_splits;
-         txn_splits = txn_splits->next, template_splits = template_splits->next)
+    for (txn_splits_iter = txn_splits, template_splits_iter = template_splits;
+         txn_splits_iter && template_splits_iter;
+         txn_splits_iter = txn_splits_iter->next,
+             template_splits_iter = template_splits_iter->next)
     {
         const Split *template_split;
         Account *split_acct;
@@ -1374,8 +1383,8 @@ create_each_transaction_helper(Transaction *template_txn, void *user_data)
         /* FIXME: Ick.  This assumes that the split lists will be ordered
            identically. :( They are, but we'd rather not have to count on
            it. --jsled */
-        template_split = (Split*)template_splits->data;
-        copying_split = (Split*)txn_splits->data;
+        template_split = (Split*)template_splits_iter->data;
+        copying_split = (Split*)txn_splits_iter->data;
 
         _get_template_split_account(sx, template_split, &split_acct,
                                     creation_data->creation_errors);
@@ -1400,6 +1409,8 @@ create_each_transaction_helper(Transaction *template_txn, void *user_data)
             xaccSplitScrub(copying_split);
         }
     }
+    g_list_free (template_splits);
+    g_list_free (txn_splits);
 
 
     {
@@ -1794,7 +1805,7 @@ static gboolean
 create_cashflow_helper(Transaction *template_txn, void *user_data)
 {
     SxCashflowData *creation_data = user_data;
-    GList *template_splits;
+    GList *template_splits, *template_splits_iter;
     const gnc_commodity *first_cmdty = NULL;
 
     DEBUG("Evaluating txn desc [%s] for sx [%s]",
@@ -1810,13 +1821,13 @@ create_cashflow_helper(Transaction *template_txn, void *user_data)
         return FALSE;
     }
 
-    for (;
-         template_splits;
-         template_splits = template_splits->next)
+    for (template_splits_iter = template_splits;
+         template_splits_iter;
+         template_splits_iter = template_splits_iter->next)
     {
         Account *split_acct;
         const gnc_commodity *split_cmdty = NULL;
-        const Split *template_split = (const Split*) template_splits->data;
+        const Split *template_split = (const Split*) template_splits_iter->data;
 
         /* Get the account that should be used for this split. */
         if (!_get_template_split_account(creation_data->sx, template_split, &split_acct, creation_data->creation_errors))
@@ -1881,6 +1892,7 @@ create_cashflow_helper(Transaction *template_txn, void *user_data)
             add_to_hash_amount(creation_data->hash, xaccAccountGetGUID(split_acct), &final);
         }
     }
+    g_list_free (template_splits);
 
     return FALSE;
 }

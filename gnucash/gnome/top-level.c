@@ -151,11 +151,15 @@ gnc_html_register_url_cb (const char *location, const char *label,
 
         trans = (Transaction *) entity;
 
-        for (node = xaccTransGetSplitList (trans); node; node = node->next)
         {
-            split = node->data;
-            account = xaccSplitGetAccount(split);
-            if (account) break;
+            GList *split_list = xaccTransGetSplitList (trans);
+            for (node = split_list; node; node = node->next)
+            {
+                split = node->data;
+                account = xaccSplitGetAccount(split);
+                if (account) break;
+            }
+            g_list_free (split_list);
         }
 
         if (!account)

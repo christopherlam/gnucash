@@ -28,6 +28,7 @@
 
 #include "Account.hpp"
 #include "Scrub.h"
+#include "Transaction.hpp"
 #include "combocell.h"
 #include "gnc-component-manager.h"
 #include "gnc-prefs.h"
@@ -59,15 +60,12 @@ check_imbalance_fraction (const SplitRegister *reg,
     if (!denom_diff)
     {
         const auto imbal_comm = imbal_mon->commodity;
-        for (auto node = xaccTransGetSplitList (trans); node;
-             node = g_list_next (node))
+        for (auto split : xaccTransGetSplits (trans))
         {
-            auto split{GNC_SPLIT(node->data)};
-
             if (!(split && xaccTransStillHasSplit (trans, split)))
                 continue;
 
-            auto acc = xaccSplitGetAccount (GNC_SPLIT(node->data));
+            auto acc = xaccSplitGetAccount (split);
             if (xaccAccountGetCommodity (acc) == imbal_comm &&
                 imbal_mon->value.denom > xaccAccountGetCommoditySCU (acc))
             {
@@ -699,10 +697,8 @@ static Split *
 gnc_find_split_in_trans_by_memo (Transaction *trans, const char *memo,
                                  gboolean unit_price)
 {
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+    for (auto split : xaccTransGetSplits (trans))
     {
-        auto split = GNC_SPLIT(n->data);
-
         if (!(split && xaccTransStillHasSplit (trans, split)))
             continue;
 
@@ -957,9 +953,8 @@ gnc_split_register_auto_completion (SplitRegister *reg,
                 !gnc_commodity_equal (trans_cmdty, acct_cmdty))
                 xaccTransSetCurrency (trans, acct_cmdty);
 
-            for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+            for (auto s : xaccTransGetSplits (trans))
             {
-                auto s = GNC_SPLIT(n->data);
                 if (s && xaccTransStillHasSplit (trans, s) &&
                     default_account == xaccSplitGetAccount (s))
                 {

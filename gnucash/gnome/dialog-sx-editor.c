@@ -733,11 +733,12 @@ static gboolean
 check_transaction_splits (Transaction *txn, gpointer data)
 {
     GList *splitList = xaccTransGetSplitList (txn);
+    GList *iter;
     CheckTxnSplitData *sd = (CheckTxnSplitData*)data;
 
-    for (; splitList; splitList = splitList->next)
+    for (iter = splitList; iter; iter = iter->next)
     {
-        Split *s = (Split*)splitList->data;
+        Split *s = (Split*)iter->data;
 
         if (g_hash_table_lookup (sd->txns, (gpointer)txn) == NULL)
         {
@@ -756,7 +757,7 @@ check_transaction_splits (Transaction *txn, gpointer data)
                                         message);
             g_free (message);
             sd->err = TRUE;
-            return FALSE;
+            goto done;
         }
 
         sd->multi_commodity |= sd->tcds->multi_commodity;
@@ -773,7 +774,7 @@ check_transaction_splits (Transaction *txn, gpointer data)
                                         message);
             g_free (message);
             sd->err = TRUE;
-            return FALSE;
+            goto done;
         }
 
         if (!gnc_sxed_split_calculate_formula (sd->sxed, s, sd->vars,
@@ -789,9 +790,11 @@ check_transaction_splits (Transaction *txn, gpointer data)
                                         message);
             g_free (message);
             sd->err = TRUE;
-            return FALSE;
+            goto done;
         }
     }
+done:
+    g_list_free (splitList);
     return FALSE; // return FALSE to continue to next transaction
 }
 

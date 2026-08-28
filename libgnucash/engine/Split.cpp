@@ -2168,9 +2168,8 @@ xaccSplitGetOtherSplit (const Split *split)
     trans = split->parent;
     if (!trans) return nullptr;
 
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+    for (Split *s : trans->splits)
     {
-        Split *s = GNC_SPLIT(n->data);
         if ((s == split) ||
             (!xaccTransStillHasSplit(trans, s)) ||
             (xaccAccountGetType (xaccSplitGetAccount (s)) == ACCT_TYPE_TRADING) ||

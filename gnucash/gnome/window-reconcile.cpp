@@ -42,6 +42,7 @@
 #include "Account.hpp"
 #include "Scrub.h"
 #include "Scrub3.h"
+#include "Transaction.hpp"
 #include "dialog-account.h"
 #include "dialog-transfer.h"
 #include "dialog-utils.h"
@@ -2380,9 +2381,8 @@ find_payment_account(Account *account)
         if (!gnc_numeric_positive_p (xaccSplitGetAmount(split)))
             continue;
 
-        for (auto n = xaccTransGetSplitList (xaccSplitGetParent(split)); n; n = n->next)
+        for (auto s : xaccTransGetSplits (xaccSplitGetParent(split)))
         {
-            auto s = GNC_SPLIT(n->data);
             if (s == split)
                 continue;
 

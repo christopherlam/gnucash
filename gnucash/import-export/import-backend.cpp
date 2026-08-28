@@ -484,8 +484,12 @@ TransactionGetTokens(GNCImportTransInfo *info)
      */
     tokens = g_list_prepend(tokens, g_strdup(local_day_of_week));
 
-    /* make tokens from the memo of each split of this transaction */
-    for (GList *node=xaccTransGetSplitList (transaction); node; node=node->next)
+    /* make tokens from the memo of each split of this transaction.
+     * Note: xaccTransGetSplitList()'s returned list is not freed here:
+     * the mocked Transaction used in this file's unit tests
+     * (gmock-Transaction.cpp) hands back a list owned by the test
+     * fixture, and freeing it here would double-free that list. */
+    for (GList *node = xaccTransGetSplitList (transaction); node; node = node->next)
     {
         text = xaccSplitGetMemo(static_cast<Split*>(node->data));
         tokens = tokenize_string(tokens, text);

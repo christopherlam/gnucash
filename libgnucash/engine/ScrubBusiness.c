@@ -195,6 +195,7 @@ scrub_start:
         Split *sl_split = sls_iter->data;
         Transaction *ll_txn = NULL; // ll_txn = "Lot Link Transaction"
         SplitList *lts_iter = NULL;
+        SplitList *lts_list = NULL;
 
         if (!sl_split)
             continue; // next scrub lot split
@@ -232,7 +233,8 @@ scrub_start:
         }
 
         // Iterate over all splits in the lot link transaction
-        for (lts_iter = xaccTransGetSplitList (ll_txn); lts_iter; lts_iter = lts_iter->next)
+        lts_list = xaccTransGetSplitList (ll_txn);
+        for (lts_iter = lts_list; lts_iter; lts_iter = lts_iter->next)
         {
             Split *ll_txn_split = lts_iter->data; // These all refer to splits in the lot link transaction
             GNCLot *remote_lot = NULL; // lot at the other end of the lot link transaction
@@ -304,10 +306,12 @@ scrub_start:
             if (restart_needed)
             {
                 modified = TRUE;
+                g_list_free (lts_list);
                 goto scrub_start;
             }
 
         }
+        g_list_free (lts_list);
     }
 
     return modified;
