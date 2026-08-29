@@ -42,8 +42,6 @@
 
 #include "gnc-address-xml-v2.h"
 
-static QofLogModule log_module = GNC_MOD_IO;
-
 const gchar* address_version_string = "2.0.0";
 
 /* ids */
@@ -87,118 +85,6 @@ gnc_address_to_dom_tree (const char* tag, GncAddress* addr)
     xmlAddChild (ret, qof_instance_slots_to_dom_tree (addr_slots_string,
                                                       QOF_INSTANCE (addr)));
     return ret;
-}
-
-/***********************************************************************/
-
-struct address_pdata
-{
-    GncAddress* address;
-};
-
-
-static gboolean
-address_name_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetName, pdata->address, node);
-}
-
-static gboolean
-address_addr1_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetAddr1, pdata->address, node);
-}
-
-static gboolean
-address_addr2_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetAddr2, pdata->address, node);
-}
-
-static gboolean
-address_addr3_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetAddr3, pdata->address, node);
-}
-
-static gboolean
-address_addr4_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetAddr4, pdata->address, node);
-}
-
-static gboolean
-address_phone_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetPhone, pdata->address, node);
-}
-
-static gboolean
-address_fax_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetFax, pdata->address, node);
-}
-
-static gboolean
-address_email_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-
-    return apply_xmlnode_text (gncAddressSetEmail, pdata->address, node);
-}
-
-static gboolean
-address_slots_handler (xmlNodePtr node, gpointer addr_pdata)
-{
-    struct address_pdata* pdata = static_cast<decltype (pdata)> (addr_pdata);
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->address));
-}
-
-static struct dom_tree_handler address_handlers_v2[] =
-{
-    { addr_name_string, address_name_handler, 0, 0 },
-    { addr_addr1_string, address_addr1_handler, 0, 0 },
-    { addr_addr2_string, address_addr2_handler, 0, 0 },
-    { addr_addr3_string, address_addr3_handler, 0, 0 },
-    { addr_addr4_string, address_addr4_handler, 0, 0 },
-    { addr_phone_string, address_phone_handler, 0, 0 },
-    { addr_fax_string, address_fax_handler, 0, 0 },
-    { addr_email_string, address_email_handler, 0, 0 },
-    { addr_slots_string, address_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-gboolean
-gnc_dom_tree_to_address (xmlNodePtr node, GncAddress* address)
-{
-    struct address_pdata addr_pdata;
-    gboolean successful;
-
-    addr_pdata.address = address;
-
-    successful = dom_tree_generic_parse (node, address_handlers_v2,
-                                         &addr_pdata);
-
-    if (!successful)
-    {
-        PERR ("failed to parse address tree");
-    }
-
-    return successful;
 }
 
 /***********************************************************************/
