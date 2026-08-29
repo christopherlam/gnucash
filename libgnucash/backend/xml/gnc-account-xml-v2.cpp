@@ -29,6 +29,7 @@
 #include <string.h>
 #include <AccountP.hpp>
 #include <Account.h>
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -437,68 +438,6 @@ static struct dom_tree_handler account_handlers_v2[] =
     { NULL, 0, 0, 0 }
 };
 
-static gboolean
-gnc_account_end_handler (gpointer data_for_children,
-                         GSList* data_from_children, GSList* sibling_data,
-                         gpointer parent_data, gpointer global_data,
-                         gpointer* result, const gchar* tag)
-{
-    Account* acc, *parent, *root;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-    int type;
-
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
-    if (!tag)
-    {
-        return TRUE;
-    }
-
-    g_return_val_if_fail (tree, FALSE);
-
-    acc = dom_tree_to_account (tree, book);
-    if (acc != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, acc);
-        /*
-         * Now return the account to the "edit" state.  At the end of reading
-         * all the transactions, we will Commit.  This replaces #splits
-         * rebalances with #accounts rebalances at the end.  A BIG win!
-         */
-        xaccAccountBeginEdit (acc);
-
-        /* Backwards compatibility.  If there's no parent, see if this
-         * account is of type ROOT.  If not, find or create a ROOT
-         * account and make that the parent. */
-        parent = gnc_account_get_parent (acc);
-        if (parent == NULL)
-        {
-            type = xaccAccountGetType (acc);
-            if (type != ACCT_TYPE_ROOT)
-            {
-                root = gnc_book_get_root_account (book);
-                if (root == NULL)
-                {
-                    root = gnc_account_create_root (book);
-                }
-                gnc_account_append_child (root, acc);
-            }
-        }
-    }
-
-    xmlFreeNode (tree);
-
-    return acc != NULL;
-}
-
 Account*
 dom_tree_to_account (xmlNodePtr node, QofBook* book)
 {
@@ -528,10 +467,412 @@ dom_tree_to_account (xmlNodePtr node, QofBook* book)
     return accToRet;
 }
 
+/***********************************************************************/
+/* SAX-direct (streaming) account parser.
+ *
+ * dom_tree_to_account() above is unchanged and still used for template
+ * accounts under scheduled transactions, which hand it an already-built
+ * DOM subtree. gnc_account_sixtp_parser_create() below builds a real
+ * sixtp parser tree instead, so an ordinary gnc:account element -- the
+ * second-highest-volume element in a real book, after gnc:transaction --
+ * is consumed straight off the SAX character stream: no intermediate
+ * xmlNodePtr for any scalar field (name, id, type, commodity, code,
+ * description, parent, hidden, placeholder, commodity-scu). Only
+ * act:slots (a kvp frame) and act:lots (each a nested gnc:lot, itself
+ * containing kvp) still go through a narrowly scoped DOM sub-parser via
+ * sixtp_dom_parser_new_rooted().
+ */
+
+struct account_sax_pdata
+{
+    Account* account;
+    QofBook* book;
+};
+
+static gboolean
+sax_act_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccAccountSetName (pdata->account, txt); return TRUE; });
+}
+
+static gboolean
+sax_act_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        xaccAccountSetGUID (pdata->account, &guid);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_type_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GNCAccountType type = ACCT_TYPE_INVALID;
+        xaccAccountStringToType (txt, &type);
+        xaccAccountSetType (pdata->account, type);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_code_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccAccountSetCode (pdata->account, txt); return TRUE; });
+}
+
+static gboolean
+sax_act_description_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccAccountSetDescription (pdata->account, txt); return TRUE; });
+}
+
+static gboolean
+sax_act_commodity_scu_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    /* dom_tree_to_integer()-based account_commodity_scu_handler() never
+       failed the parse over a malformed value either; match that. */
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        xaccAccountSetCommoditySCU (pdata->account, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_hidden_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        xaccAccountSetHidden (pdata->account,
+                              g_ascii_strncasecmp (txt, "true", 4) == 0);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_placeholder_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        xaccAccountSetPlaceholder (pdata->account,
+                                   g_ascii_strncasecmp (txt, "true", 4) == 0);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_non_standard_scu_end (gpointer, GSList*, GSList*, gpointer parent_data,
+                              gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    xaccAccountSetNonStdSCU (pdata->account, TRUE);
+    return TRUE;
+}
+
+static gboolean
+sax_act_parent_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        Account* parent = xaccAccountLookup (&guid, pdata->book);
+        if (!parent) return FALSE;
+        gnc_account_append_child (parent, pdata->account);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_commodity_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
+
+    for (GSList* lp = dfc; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
+    }
+    /* account_commodity_handler() always calls xaccAccountSetCommodity()
+       with whatever dom_tree_to_commodity_ref() returned (NULL included)
+       and always returns TRUE; match that instead of failing the parse. */
+    gnc_commodity* ref = nullptr;
+    if (space && id)
+    {
+        g_strstrip (space);
+        g_strstrip (id);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        if (table)
+            ref = gnc_commodity_table_lookup (table, space, id);
+    }
+
+    xaccAccountSetCommodity (pdata->account, ref);
+    return TRUE;
+}
+
+static gboolean
+sax_act_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                       gpointer parent_data, gpointer, gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->account));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+static gboolean
+sax_act_lots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                      gpointer parent_data, gpointer, gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+
+    if (tree)
+    {
+        for (xmlNodePtr mark = tree->xmlChildrenNode; mark && ok; mark = mark->next)
+        {
+            if (g_strcmp0 ("text", (char*) mark->name) == 0)
+                continue;
+
+            GNCLot* lot = dom_tree_to_lot (mark, pdata->book);
+            if (lot)
+                xaccAccountInsertLot (pdata->account, lot);
+            else
+                ok = FALSE;
+        }
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+/* Deprecated, pre-1.6 fallback tags. Rare in practice, so these stay on
+   the (narrowly scoped) DOM path rather than earning their own SAX-direct
+   handlers. */
+
+static gboolean
+sax_act_deprecated_currency_end (gpointer data_for_children, GSList*, GSList*,
+                                 gpointer parent_data, gpointer, gpointer* result,
+                                 const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    if (tree)
+    {
+        gnc_commodity* ref = dom_tree_to_commodity_ref_no_engine (tree, pdata->book);
+        DxaccAccountSetCurrency (pdata->account, ref);
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return TRUE;
+}
+
+static gboolean
+sax_act_deprecated_security_end (gpointer data_for_children, GSList*, GSList*,
+                                 gpointer parent_data, gpointer, gpointer* result,
+                                 const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    if (tree)
+    {
+        gnc_commodity* orig = xaccAccountGetCommodity (pdata->account);
+        if (!orig || gnc_commodity_is_currency (orig))
+        {
+            gnc_commodity* ref = dom_tree_to_commodity_ref_no_engine (tree, pdata->book);
+            xaccAccountSetCommodity (pdata->account, ref);
+            xaccAccountSetCommoditySCU (pdata->account, 0);
+        }
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return TRUE;
+}
+
+static gboolean
+sax_act_deprecated_security_scu_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        if (!xaccAccountGetCommoditySCU (pdata->account))
+        {
+            gint64 val;
+            if (string_to_gint64 (txt, &val))
+                xaccAccountSetCommoditySCU (pdata->account, val);
+        }
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_act_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+              gpointer*, const gchar* tag, gchar**)
+{
+    /* See sax_trn_start() in gnc-transaction-xml-v2.cpp for why the NULL
+       tag case (the synthetic top-frame priming call) must not allocate. */
+    if (!tag)
+    {
+        *data_for_children = nullptr;
+        return TRUE;
+    }
+
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (account_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->account = xaccMallocAccount (pdata->book);
+    xaccAccountBeginEdit (pdata->account);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_act_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+            gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+
+    if (!tag)
+        return TRUE;
+
+    Account* acc = pdata->account;
+    QofBook* book = pdata->book;
+    g_free (pdata);
+
+    /* Close out the BeginEdit() opened in sax_act_start() -- the account
+       must be fully committed before the callback runs, matching
+       dom_tree_to_account()'s own begin/commit pair -- then immediately
+       reopen it below, exactly as the DOM-based gnc_account_end_handler()
+       used to. */
+    xaccAccountCommitEdit (acc);
+
+    gdata->cb (tag, gdata->parsedata, acc);
+
+    /* Now return the account to the "edit" state. At the end of reading
+       all the transactions, we will Commit. This replaces #splits
+       rebalances with #accounts rebalances at the end. A BIG win! */
+    xaccAccountBeginEdit (acc);
+
+    /* Backwards compatibility. If there's no parent, see if this account
+       is of type ROOT. If not, find or create a ROOT account and make
+       that the parent. */
+    Account* parent = gnc_account_get_parent (acc);
+    if (parent == NULL && xaccAccountGetType (acc) != ACCT_TYPE_ROOT)
+    {
+        Account* root = gnc_book_get_root_account (book);
+        if (root == NULL)
+            root = gnc_account_create_root (book);
+        gnc_account_append_child (root, acc);
+    }
+
+    return TRUE;
+}
+
+static void
+sax_act_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+             gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<account_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    xaccAccountDestroy (pdata->account);
+    g_free (pdata);
+}
+
 sixtp*
 gnc_account_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_account_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_act_start,
+        SIXTP_END_HANDLER_ID, sax_act_end,
+        SIXTP_FAIL_HANDLER_ID, sax_act_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        act_name_string, restore_char_generator (sax_act_name_end),
+        act_id_string, restore_char_generator (sax_act_id_end),
+        act_type_string, restore_char_generator (sax_act_type_end),
+        act_commodity_scu_string, restore_char_generator (sax_act_commodity_scu_end),
+        act_non_standard_scu_string, restore_char_generator (sax_act_non_standard_scu_end),
+        act_code_string, restore_char_generator (sax_act_code_end),
+        act_description_string, restore_char_generator (sax_act_description_end),
+        act_parent_string, restore_char_generator (sax_act_parent_end),
+        act_hidden_string, restore_char_generator (sax_act_hidden_end),
+        act_placeholder_string, restore_char_generator (sax_act_placeholder_end),
+        act_slots_string, sixtp_dom_parser_new_rooted (sax_act_slots_dom_end, NULL, NULL),
+        act_lots_string, sixtp_dom_parser_new_rooted (sax_act_lots_dom_end, NULL, NULL),
+        act_currency_string, sixtp_dom_parser_new_rooted (sax_act_deprecated_currency_end, NULL, NULL),
+        act_security_string, sixtp_dom_parser_new_rooted (sax_act_deprecated_security_end, NULL, NULL),
+        act_security_scu_string, restore_char_generator (sax_act_deprecated_security_scu_end),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, act_commodity_string,
+                          sax_commodity_ref_parser_new (sax_act_commodity_end));
+
+    /* act:currency-scu is deprecated and always ignored (see
+       deprecated_account_currency_scu_handler() above); accept and
+       discard it so files that still carry it keep parsing. */
+    sixtp_add_sub_parser (p, act_currency_scu_string,
+                          restore_char_generator (
+                              [] (gpointer, GSList* dfc, GSList*, gpointer, gpointer,
+                                  gpointer*, const gchar*) -> gboolean
+                              {
+                                  gchar* txt = concatenate_child_result_chars (dfc);
+                                  g_free (txt);
+                                  return TRUE;
+                              }));
+
+    /* Self-reference under our own tag: see the equivalent comment in
+       gnc_transaction_sixtp_parser_create() in gnc-transaction-xml-v2.cpp. */
+    sixtp_add_sub_parser (p, gnc_account_string, p);
+
+    return p;
 }
 
 /* ======================  END OF FILE ===================*/
