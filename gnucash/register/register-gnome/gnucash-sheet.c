@@ -2270,6 +2270,19 @@ gnucash_get_style_classes (GnucashSheet *sheet, GtkStyleContext *stylectxt,
 
 /*************************************************************/
 
+/* Called when the user requests the context menu via the keyboard
+ * (Shift-F10/Menu key by default) while the sheet has focus.  This
+ * mirrors the right-click handling in gnucash-item-edit.c's
+ * button_press_cb, which shows the same menu on a mouse right-click. */
+static gboolean
+gnucash_sheet_popup_menu (GtkWidget *widget)
+{
+    GnucashSheet *sheet = GNUCASH_SHEET(widget);
+
+    g_signal_emit_by_name (sheet->reg, "show_popup_menu");
+    return TRUE;
+}
+
 static void
 gnucash_sheet_class_init (GnucashSheetClass *klass)
 {
@@ -2296,6 +2309,7 @@ gnucash_sheet_class_init (GnucashSheetClass *klass)
     widget_class->button_press_event = gnucash_sheet_button_press_event;
     widget_class->button_release_event = gnucash_sheet_button_release_event;
     widget_class->scroll_event = gnucash_scroll_event;
+    widget_class->popup_menu = gnucash_sheet_popup_menu;
 }
 
 

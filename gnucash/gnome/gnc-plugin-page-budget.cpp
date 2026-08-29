@@ -454,6 +454,8 @@ gnc_plugin_page_budget_create_widget (GncPluginPage *plugin_page)
 #endif
     g_signal_connect (G_OBJECT(priv->budget_view), "button-press-event",
                       G_CALLBACK(gppb_button_press_cb), plugin_page);
+    g_signal_connect (G_OBJECT(priv->budget_view), "popup-menu",
+                      G_CALLBACK(gnc_main_window_popup_menu_cb), plugin_page);
     g_signal_connect (G_OBJECT(priv->budget_view), "account-activated",
                       G_CALLBACK(gppb_account_activated_cb), page);
 
