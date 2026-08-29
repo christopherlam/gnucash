@@ -31,6 +31,8 @@
 #include "gncOrderP.h"
 #include "gncInvoiceP.h"
 #include "gncTaxTableP.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -47,8 +49,6 @@
 #include "gnc-owner-xml-v2.h"
 
 #define _GNC_MOD_NAME   GNC_ID_ENTRY
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* entry_version_string = "2.0.0";
 
@@ -216,534 +216,525 @@ entry_dom_tree_create (GncEntry* entry)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) entry parser: reads a gnc:GncEntry straight
+   off the SAX character stream, with no intermediate xmlNodePtr built
+   for any of its fields. Nothing else in the codebase uses the old
+   DOM-based parser this replaces, so it's gone entirely. */
 
-struct entry_pdata
+struct entry_sax_pdata
 {
     GncEntry* entry;
     QofBook* book;
-    Account* acc;
+    Account* acc;       /* legacy entry:acct: which side it belongs to
+                            isn't known until entry:bill/invoice is seen */
+    GncOwner billto;
 };
 
-static inline gboolean
-set_time64 (xmlNodePtr node, GncEntry* entry,
-              void (*func) (GncEntry* entry, time64 ts))
+static gboolean
+sax_entry_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
 {
-    time64 time = dom_tree_to_time64 (node);
-    if (!dom_tree_valid_time64 (time, node->name)) time = 0;
-    func (entry, time);
-    return TRUE;
-}
-
-static inline gboolean
-set_numeric (xmlNodePtr node, GncEntry* entry,
-             void (*func) (GncEntry* entry, gnc_numeric num))
-{
-    func (entry, dom_tree_to_gnc_numeric (node));
-    return TRUE;
-}
-
-static inline gboolean
-set_boolean (xmlNodePtr node, GncEntry* entry,
-             void (*func) (GncEntry* entry, gboolean val))
-{
-    gint64 val;
-
-    if (!dom_tree_to_integer (node, &val))
-        return FALSE;
-    func (entry, (gboolean)val);
-    return TRUE;
-}
-
-static inline gboolean
-set_account (xmlNodePtr node, struct entry_pdata* pdata,
-             void (*func) (GncEntry* entry, Account* acc))
-{
-    Account* acc;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    acc = xaccAccountLookup (&*guid, pdata->book);
-    g_return_val_if_fail (acc, FALSE);
-
-    if (func)
-        func (pdata->entry, acc);
-    else
-        pdata->acc = acc;
-    return TRUE;
-}
-
-static inline gboolean
-set_taxtable (xmlNodePtr node, struct entry_pdata* pdata,
-              void (*func) (GncEntry* entry, GncTaxTable* taxtable))
-{
-    GncTaxTable* taxtable;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    taxtable = gncTaxTableLookup (pdata->book, &*guid);
-    if (!taxtable)
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        taxtable = gncTaxTableCreate (pdata->book);
-        gncTaxTableBeginEdit (taxtable);
-        gncTaxTableSetGUID (taxtable, &*guid);
-        gncTaxTableCommitEdit (taxtable);
-    }
-    else
-        gncTaxTableDecRef (taxtable);
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    func (pdata->entry, taxtable);
-    return TRUE;
+        /* Adopt an entry that already exists by this guid (e.g. a
+           placeholder created earlier by an order/invoice/bill
+           reference) instead of the fresh one sax_entry_start()
+           made. */
+        GncEntry* entry = gncEntryLookup (pdata->book, &guid);
+        if (entry)
+        {
+            gncEntryDestroy (pdata->entry);
+            pdata->entry = entry;
+            gncEntryBeginEdit (entry);
+        }
+        else
+            gncEntrySetGUID (pdata->entry, &guid);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_guid_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_date_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    GncEntry* entry;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    entry = gncEntryLookup (pdata->book, &*guid);
-    if (entry)
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncEntryDestroy (pdata->entry);
-        pdata->entry = entry;
-        gncEntryBeginEdit (entry);
-    }
-    else
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST entry_date_string)) t = 0;
+        gncEntrySetDate (pdata->entry, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_entry_dateentered_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                              gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncEntrySetGUID (pdata->entry, &*guid);
-    }
-
-    return TRUE;
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST entry_dateentered_string)) t = 0;
+        gncEntrySetDateEntered (pdata->entry, t);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_date_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_description_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_time64 (node, pdata->entry, gncEntrySetDate);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEntrySetDescription (pdata->entry, txt); return TRUE; });
 }
 
 static gboolean
-entry_dateentered_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_action_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_time64 (node, pdata->entry, gncEntrySetDateEntered);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEntrySetAction (pdata->entry, txt); return TRUE; });
 }
 
 static gboolean
-entry_description_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_notes_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return apply_xmlnode_text (gncEntrySetDescription, pdata->entry, node);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEntrySetNotes (pdata->entry, txt); return TRUE; });
 }
 
 static gboolean
-entry_action_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_numeric_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       void (*setter) (GncEntry*, gnc_numeric))
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return apply_xmlnode_text (gncEntrySetAction, pdata->entry, node);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata, setter] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        setter (pdata->entry, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_notes_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
+sax_entry_qty_end (gpointer dfc_holder, GSList* dfc, GSList* sib, gpointer parent_data,
+                   gpointer gd, gpointer* res, const gchar* tag)
+{ return sax_entry_numeric_end (dfc_holder, dfc, sib, parent_data, gncEntrySetQuantity); }
 
-    return apply_xmlnode_text (gncEntrySetNotes, pdata->entry, node);
+static gboolean
+sax_entry_iprice_end (gpointer dfc_holder, GSList* dfc, GSList* sib, gpointer parent_data,
+                      gpointer gd, gpointer* res, const gchar* tag)
+{ return sax_entry_numeric_end (dfc_holder, dfc, sib, parent_data, gncEntrySetInvPrice); }
+
+static gboolean
+sax_entry_idiscount_end (gpointer dfc_holder, GSList* dfc, GSList* sib, gpointer parent_data,
+                         gpointer gd, gpointer* res, const gchar* tag)
+{ return sax_entry_numeric_end (dfc_holder, dfc, sib, parent_data, gncEntrySetInvDiscount); }
+
+static gboolean
+sax_entry_bprice_end (gpointer dfc_holder, GSList* dfc, GSList* sib, gpointer parent_data,
+                      gpointer gd, gpointer* res, const gchar* tag)
+{ return sax_entry_numeric_end (dfc_holder, dfc, sib, parent_data, gncEntrySetBillPrice); }
+
+static gboolean
+sax_entry_price_legacy_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    /* legacy entry:price: sets both inv-price and bill-price. */
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        if (gnc_numeric_check (num)) num = gnc_numeric_zero ();
+        gncEntrySetInvPrice (pdata->entry, num);
+        gncEntrySetBillPrice (pdata->entry, num);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_qty_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_idisctype_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return set_numeric (node, pdata->entry, gncEntrySetQuantity);
-}
-
-/* Cust invoice */
-
-static gboolean
-entry_invacct_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_account (node, pdata, gncEntrySetInvAccount);
-}
-
-static gboolean
-entry_iprice_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return set_numeric (node, pdata->entry, gncEntrySetInvPrice);
-}
-
-static gboolean
-entry_idiscount_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return set_numeric (node, pdata->entry, gncEntrySetInvDiscount);
-}
-
-static gboolean
-entry_idisctype_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    auto entry = pdata->entry;
-    auto set_discount_type = [entry](auto str)
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
         GncAmountType type;
-        if (!gncAmountStringToType (str, &type)) return false;
-        gncEntrySetInvDiscountType (entry, type);
-        return true;
-    };
-    return apply_xmlnode_text (set_discount_type, node, FALSE);
+        if (gncAmountStringToType (txt, &type))
+            gncEntrySetInvDiscountType (pdata->entry, type);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_idischow_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_idischow_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    auto entry = pdata->entry;
-    auto set_discount_how = [entry](auto str)
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
         GncDiscountHow how;
-        if (!gncEntryDiscountStringToHow (str, &how)) return false;
-        gncEntrySetInvDiscountHow (entry, how);
-        return true;
-    };
-    return apply_xmlnode_text (set_discount_how, node, FALSE);
+        if (gncEntryDiscountStringToHow (txt, &how))
+            gncEntrySetInvDiscountHow (pdata->entry, how);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_itaxable_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_boolean_end (gpointer dfc_holder, GSList* dfc, gpointer parent_data,
+                       void (*setter) (GncEntry*, gboolean))
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_boolean (node, pdata->entry, gncEntrySetInvTaxable);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata, setter] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        setter (pdata->entry, (gboolean) val);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_itaxincluded_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_itaxable_end (gpointer dh, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{ return sax_entry_boolean_end (dh, dfc, parent_data, gncEntrySetInvTaxable); }
+
+static gboolean
+sax_entry_itaxincluded_end (gpointer dh, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{ return sax_entry_boolean_end (dh, dfc, parent_data, gncEntrySetInvTaxIncluded); }
+
+static gboolean
+sax_entry_btaxable_end (gpointer dh, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{ return sax_entry_boolean_end (dh, dfc, parent_data, gncEntrySetBillTaxable); }
+
+static gboolean
+sax_entry_btaxincluded_end (gpointer dh, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{ return sax_entry_boolean_end (dh, dfc, parent_data, gncEntrySetBillTaxIncluded); }
+
+static gboolean
+sax_entry_billable_end (gpointer dh, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{ return sax_entry_boolean_end (dh, dfc, parent_data, gncEntrySetBillable); }
+
+static gboolean
+sax_entry_taxtable_end (gpointer parent_data, GSList* dfc,
+                        void (*setter) (GncEntry*, GncTaxTable*))
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_boolean (node, pdata->entry, gncEntrySetInvTaxIncluded);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata, setter] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        GncTaxTable* taxtable = gncTaxTableLookup (pdata->book, &guid);
+        if (!taxtable)
+        {
+            taxtable = gncTaxTableCreate (pdata->book);
+            gncTaxTableBeginEdit (taxtable);
+            gncTaxTableSetGUID (taxtable, &guid);
+            gncTaxTableCommitEdit (taxtable);
+        }
+        else
+            gncTaxTableDecRef (taxtable);
+
+        setter (pdata->entry, taxtable);
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_itaxtable_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_taxtable (node, pdata, gncEntrySetInvTaxTable);
-}
-
-/* vendor bills */
+sax_entry_itaxtable_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{ return sax_entry_taxtable_end (parent_data, dfc, gncEntrySetInvTaxTable); }
 
 static gboolean
-entry_billacct_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_account (node, pdata, gncEntrySetBillAccount);
-}
+sax_entry_btaxtable_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{ return sax_entry_taxtable_end (parent_data, dfc, gncEntrySetBillTaxTable); }
 
 static gboolean
-entry_bprice_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_account_end (gpointer parent_data, GSList* dfc,
+                       void (*setter) (GncEntry*, Account*))
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata, setter] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        Account* acc = xaccAccountLookup (&guid, pdata->book);
+        g_return_val_if_fail (acc, FALSE);
 
-    return set_numeric (node, pdata->entry, gncEntrySetBillPrice);
-}
-
-static gboolean
-entry_btaxable_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_boolean (node, pdata->entry, gncEntrySetBillTaxable);
-}
-
-static gboolean
-entry_btaxincluded_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_boolean (node, pdata->entry, gncEntrySetBillTaxIncluded);
+        if (setter)
+            setter (pdata->entry, acc);
+        else
+            pdata->acc = acc;
+        return TRUE;
+    });
 }
 
 static gboolean
-entry_btaxtable_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_invacct_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{ return sax_entry_account_end (parent_data, dfc, gncEntrySetInvAccount); }
+
+static gboolean
+sax_entry_billacct_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{ return sax_entry_account_end (parent_data, dfc, gncEntrySetBillAccount); }
+
+static gboolean
+sax_entry_acct_legacy_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_taxtable (node, pdata, gncEntrySetBillTaxTable);
+    /* legacy entry:acct: which side (invoice or bill) it belongs to
+       isn't known until entry:bill/entry:invoice is seen, so stash it
+       and resolve at the entry's own end. */
+    return sax_entry_account_end (parent_data, dfc, nullptr);
 }
 
 static gboolean
-entry_billable_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_billto_start (GSList*, gpointer parent_data, gpointer,
+                        gpointer* data_for_children, gpointer*, const gchar*, gchar**)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    return set_boolean (node, pdata->entry, gncEntrySetBillable);
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    auto* ctx = g_new (owner_sax_ctx, 1);
+    ctx->owner = &pdata->billto;
+    ctx->book = pdata->book;
+    *data_for_children = ctx;
+    return TRUE;
 }
 
 static gboolean
-entry_billto_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_billpayment_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    GncOwner billto;
-    gboolean ret;
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncEntryPaymentType type;
+        if (gncEntryPaymentStringToType (txt, &type))
+            gncEntrySetBillPayment (pdata->entry, type);
+        return TRUE;
+    });
+}
 
-    ret = gnc_dom_tree_to_owner (node, &billto, pdata->book);
-    if (ret)
-        gncEntrySetBillTo (pdata->entry, &billto);
+static gboolean
+sax_entry_order_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        GncOrder* order = gncOrderLookup (pdata->book, &guid);
+        if (!order)
+        {
+            order = gncOrderCreate (pdata->book);
+            gncOrderBeginEdit (order);
+            gncOrderSetGUID (order, &guid);
+            gncOrderCommitEdit (order);
+        }
+        gncOrderBeginEdit (order);
+        gncOrderAddEntry (order, pdata->entry);
+        gncOrderCommitEdit (order);
+        return TRUE;
+    });
+}
 
+static gboolean
+sax_entry_invoice_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        GncInvoice* invoice = gncInvoiceLookup (pdata->book, &guid);
+        if (!invoice)
+        {
+            invoice = gncInvoiceCreate (pdata->book);
+            gncInvoiceBeginEdit (invoice);
+            gncInvoiceSetGUID (invoice, &guid);
+            gncInvoiceCommitEdit (invoice);
+        }
+        gncInvoiceBeginEdit (invoice);
+        gncInvoiceAddEntry (invoice, pdata->entry);
+        gncInvoiceCommitEdit (invoice);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_entry_bill_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        GncInvoice* invoice = gncInvoiceLookup (pdata->book, &guid);
+        if (!invoice)
+        {
+            invoice = gncInvoiceCreate (pdata->book);
+            gncInvoiceBeginEdit (invoice);
+            gncInvoiceSetGUID (invoice, &guid);
+            gncInvoiceCommitEdit (invoice);
+        }
+        gncInvoiceBeginEdit (invoice);
+        gncBillAddEntry (invoice, pdata->entry);
+        gncInvoiceCommitEdit (invoice);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_entry_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                         gpointer parent_data, gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->entry));
+    xmlFreeNode (tree);
     return ret;
 }
 
-/* employee bills */
 static gboolean
-entry_billpayment_handler (xmlNodePtr node, gpointer entry_pdata)
+sax_entry_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                 gpointer*, const gchar* tag, gchar**)
 {
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    auto entry = pdata->entry;
-    auto set_billpayment = [entry](auto str)
-    {
-        GncEntryPaymentType type;
-        if (!gncEntryPaymentStringToType (str, &type)) return false;
-        gncEntrySetBillPayment (entry, type);
-        return true;
-    };
-    return apply_xmlnode_text (set_billpayment, node, FALSE);
-}
-
-/* The rest of the stuff */
-
-static gboolean
-entry_order_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    GncOrder* order;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    order = gncOrderLookup (pdata->book, &*guid);
-    if (!order)
-    {
-        order = gncOrderCreate (pdata->book);
-        gncOrderBeginEdit (order);
-        gncOrderSetGUID (order, &*guid);
-        gncOrderCommitEdit (order);
-    }
-    gncOrderBeginEdit (order);
-    gncOrderAddEntry (order, pdata->entry);
-    gncOrderCommitEdit (order);
-
-    return TRUE;
-}
-
-static gboolean
-entry_invoice_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    GncInvoice* invoice;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    invoice = gncInvoiceLookup (pdata->book, &*guid);
-    if (!invoice)
-    {
-        invoice = gncInvoiceCreate (pdata->book);
-        gncInvoiceBeginEdit (invoice);
-        gncInvoiceSetGUID (invoice, &*guid);
-        gncInvoiceCommitEdit (invoice);
-    }
-    gncInvoiceBeginEdit (invoice);
-    gncInvoiceAddEntry (invoice, pdata->entry);
-    gncInvoiceCommitEdit (invoice);
-
-    return TRUE;
-}
-
-static gboolean
-entry_bill_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    GncInvoice* invoice;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    invoice = gncInvoiceLookup (pdata->book, &*guid);
-    if (!invoice)
-    {
-        invoice = gncInvoiceCreate (pdata->book);
-        gncInvoiceBeginEdit (invoice);
-        gncInvoiceSetGUID (invoice, &*guid);
-        gncInvoiceCommitEdit (invoice);
-    }
-    gncInvoiceBeginEdit (invoice);
-    gncBillAddEntry (invoice, pdata->entry);
-    gncInvoiceCommitEdit (invoice);
-
-    return TRUE;
-}
-
-/* Support for older XML versions */
-
-static gboolean
-entry_acct_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    /* XXX: try to figure out if this is an 'invoice' or a 'bill' --
-     * we have to wait until the end!
-     */
-
-    return set_account (node, pdata, NULL);
-}
-
-static gboolean
-entry_price_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-    gboolean res;
-
-    /* just set both.. Don't worry about extra data if it's wrong */
-    res = set_numeric (node, pdata->entry, gncEntrySetInvPrice);
-    if (res)
-        gncEntrySetBillPrice (pdata->entry, gncEntryGetInvPrice (pdata->entry));
-    return res;
-}
-
-static gboolean
-entry_slots_handler (xmlNodePtr node, gpointer entry_pdata)
-{
-    struct entry_pdata* pdata = static_cast<decltype (pdata)> (entry_pdata);
-
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->entry));
-}
-
-static struct dom_tree_handler entry_handlers_v2[] =
-{
-    { entry_guid_string, entry_guid_handler, 1, 0 },
-    { entry_date_string, entry_date_handler, 1, 0 },
-    { entry_dateentered_string, entry_dateentered_handler, 1, 0 },
-    { entry_description_string, entry_description_handler, 0, 0 },
-    { entry_action_string, entry_action_handler, 0, 0 },
-    { entry_notes_string, entry_notes_handler, 0, 0 },
-    { entry_qty_string, entry_qty_handler, 0, 0 },
-
-    /* cust invoice */
-    { entry_invacct_string, entry_invacct_handler, 0, 0 },
-    { entry_iprice_string, entry_iprice_handler, 0, 0 },
-    { entry_idiscount_string, entry_idiscount_handler, 0, 0 },
-    { entry_idisctype_string, entry_idisctype_handler, 0, 0 },
-    { entry_idischow_string, entry_idischow_handler, 0, 0 },
-    { entry_itaxable_string, entry_itaxable_handler, 0, 0 },
-    { entry_itaxincluded_string, entry_itaxincluded_handler, 0, 0 },
-    { entry_itaxtable_string, entry_itaxtable_handler, 0, 0 },
-
-    /* vendor invoice */
-    { entry_billacct_string, entry_billacct_handler, 0, 0 },
-    { entry_bprice_string, entry_bprice_handler, 0, 0 },
-    { entry_btaxable_string, entry_btaxable_handler, 0, 0 },
-    { entry_btaxincluded_string, entry_btaxincluded_handler, 0, 0 },
-    { entry_btaxtable_string, entry_btaxtable_handler, 0, 0 },
-    { entry_billable_string, entry_billable_handler, 0, 0 },
-    { entry_billto_string, entry_billto_handler, 0, 0 },
-
-    /* employee stuff */
-    { entry_billpayment_string, entry_billpayment_handler, 0, 0 },
-
-    /* Other stuff */
-    { entry_order_string, entry_order_handler, 0, 0 },
-    { entry_invoice_string, entry_invoice_handler, 0, 0 },
-    { entry_bill_string, entry_bill_handler, 0, 0 },
-    { entry_slots_string, entry_slots_handler, 0, 0 },
-
-    /* Old XML support */
-    { "entry:acct", entry_acct_handler, 0, 0 },
-    { "entry:price", entry_price_handler, 0, 0 },
-    { "entry:discount", entry_idiscount_handler, 0, 0 },
-    { "entry:disc-type", entry_idisctype_handler, 0, 0 },
-    { "entry:disc-how", entry_idischow_handler, 0, 0 },
-    { "entry:taxable", entry_itaxable_handler, 0, 0 },
-    { "entry:taxincluded", entry_itaxincluded_handler, 0, 0 },
-    { "entry:taxtable", entry_itaxtable_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncEntry*
-dom_tree_to_entry (xmlNodePtr node, QofBook* book)
-{
-    struct entry_pdata entry_pdata;
-    gboolean successful;
-
-    entry_pdata.entry = gncEntryCreate (book);
-    entry_pdata.book = book;
-    entry_pdata.acc = NULL;
-    gncEntryBeginEdit (entry_pdata.entry);
-
-    successful = dom_tree_generic_parse (node, entry_handlers_v2,
-                                         &entry_pdata);
-    if (entry_pdata.acc != NULL)
-    {
-        if (gncEntryGetBill (entry_pdata.entry))
-            gncEntrySetBillAccount (entry_pdata.entry, entry_pdata.acc);
-        else
-            gncEntrySetInvAccount (entry_pdata.entry, entry_pdata.acc);
-    }
-
-    if (successful)
-        gncEntryCommitEdit (entry_pdata.entry);
-    else
-    {
-        PERR ("failed to parse entry tree");
-        gncEntryDestroy (entry_pdata.entry);
-        entry_pdata.entry = NULL;
-    }
-
-    return entry_pdata.entry;
-}
-
-static gboolean
-gnc_entry_end_handler (gpointer data_for_children,
-                       GSList* data_from_children, GSList* sibling_data,
-                       gpointer parent_data, gpointer global_data,
-                       gpointer* result, const gchar* tag)
-{
-    GncEntry* entry;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new0 (entry_sax_pdata, 1);
+    pdata->entry = gncEntryCreate (book);
+    pdata->book = book;
+    gncEntryBeginEdit (pdata->entry);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_entry_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+              gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    entry = dom_tree_to_entry (tree, book);
-    if (entry != NULL)
+    if (pdata->billto.owner.undefined != NULL)
+        gncEntrySetBillTo (pdata->entry, &pdata->billto);
+
+    /* legacy entry:acct: which side it belongs to wasn't known until
+       now -- matches the original's post-parse resolution. */
+    if (pdata->acc != NULL)
     {
-        gdata->cb (tag, gdata->parsedata, entry);
+        if (gncEntryGetBill (pdata->entry))
+            gncEntrySetBillAccount (pdata->entry, pdata->acc);
+        else
+            gncEntrySetInvAccount (pdata->entry, pdata->acc);
     }
 
-    xmlFreeNode (tree);
+    gncEntryCommitEdit (pdata->entry);
 
-    return entry != NULL;
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, pdata->entry);
+
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_entry_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<entry_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncEntryDestroy (pdata->entry);
+    g_free (pdata);
 }
 
 static sixtp*
 entry_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_entry_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_entry_start,
+        SIXTP_END_HANDLER_ID, sax_entry_end,
+        SIXTP_FAIL_HANDLER_ID, sax_entry_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        entry_guid_string, restore_char_generator (sax_entry_guid_end),
+        entry_description_string, restore_char_generator (sax_entry_description_end),
+        entry_action_string, restore_char_generator (sax_entry_action_end),
+        entry_notes_string, restore_char_generator (sax_entry_notes_end),
+        entry_qty_string, restore_char_generator (sax_entry_qty_end),
+
+        /* cust invoice */
+        entry_invacct_string, restore_char_generator (sax_entry_invacct_end),
+        entry_iprice_string, restore_char_generator (sax_entry_iprice_end),
+        entry_idiscount_string, restore_char_generator (sax_entry_idiscount_end),
+        entry_idisctype_string, restore_char_generator (sax_entry_idisctype_end),
+        entry_idischow_string, restore_char_generator (sax_entry_idischow_end),
+        entry_itaxable_string, restore_char_generator (sax_entry_itaxable_end),
+        entry_itaxincluded_string, restore_char_generator (sax_entry_itaxincluded_end),
+        entry_itaxtable_string, restore_char_generator (sax_entry_itaxtable_end),
+
+        /* vendor bills */
+        entry_billacct_string, restore_char_generator (sax_entry_billacct_end),
+        entry_bprice_string, restore_char_generator (sax_entry_bprice_end),
+        entry_btaxable_string, restore_char_generator (sax_entry_btaxable_end),
+        entry_btaxincluded_string, restore_char_generator (sax_entry_btaxincluded_end),
+        entry_btaxtable_string, restore_char_generator (sax_entry_btaxtable_end),
+        entry_billable_string, restore_char_generator (sax_entry_billable_end),
+
+        /* employee stuff */
+        entry_billpayment_string, restore_char_generator (sax_entry_billpayment_end),
+
+        /* other stuff */
+        entry_order_string, restore_char_generator (sax_entry_order_end),
+        entry_invoice_string, restore_char_generator (sax_entry_invoice_end),
+        entry_bill_string, restore_char_generator (sax_entry_bill_end),
+        entry_slots_string, sixtp_dom_parser_new_rooted (sax_entry_slots_dom_end, NULL, NULL),
+
+        /* old XML support */
+        "entry:acct", restore_char_generator (sax_entry_acct_legacy_end),
+        "entry:price", restore_char_generator (sax_entry_price_legacy_end),
+        "entry:discount", restore_char_generator (sax_entry_idiscount_end),
+        "entry:disc-type", restore_char_generator (sax_entry_idisctype_end),
+        "entry:disc-how", restore_char_generator (sax_entry_idischow_end),
+        "entry:taxable", restore_char_generator (sax_entry_itaxable_end),
+        "entry:taxincluded", restore_char_generator (sax_entry_itaxincluded_end),
+        "entry:taxtable", restore_char_generator (sax_entry_itaxtable_end),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, entry_billto_string, sax_owner_parser_new (sax_entry_billto_start));
+    sixtp_add_sub_parser (p, entry_date_string, sax_time64_parser_new (sax_entry_date_ts_end));
+    sixtp_add_sub_parser (p, entry_dateentered_string, sax_time64_parser_new (sax_entry_dateentered_ts_end));
+
+    return p;
 }
 
 static void
