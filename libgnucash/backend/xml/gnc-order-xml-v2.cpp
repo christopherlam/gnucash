@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gncOrderP.h"
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -44,8 +45,6 @@
 #include "gnc-owner-xml-v2.h"
 
 #define _GNC_MOD_NAME   GNC_ID_ORDER
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* order_version_string = "2.0.0";
 
@@ -107,201 +106,209 @@ order_dom_tree_create (GncOrder* order)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) order parser: reads a gnc:GncOrder straight
+   off the SAX character stream, with no intermediate xmlNodePtr built
+   for any of its fields. Nothing else in the codebase uses the old
+   DOM-based parser this replaces, so it's gone entirely. */
 
-struct order_pdata
+struct order_sax_pdata
 {
     GncOrder* order;
+    GncOwner owner;
     QofBook* book;
 };
 
-static inline gboolean
-set_time64 (xmlNodePtr node, GncOrder* order,
-              void (*func) (GncOrder* order, time64 tt))
-{
-    time64 time = dom_tree_to_time64 (node);
-    if (!dom_tree_valid_time64 (time, node->name)) time = 0;
-    func (order, time);
-    return TRUE;
-}
-
 static gboolean
-order_guid_handler (xmlNodePtr node, gpointer order_pdata)
+sax_order_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
 {
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-    GncOrder* order;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    order = gncOrderLookup (pdata->book, &*guid);
-    if (order)
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncOrderDestroy (pdata->order);
-        pdata->order = order;
-        gncOrderBeginEdit (order);
-    }
-    else
-    {
-        gncOrderSetGUID (pdata->order, &*guid);
-    }
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    return TRUE;
-}
-
-static gboolean
-order_id_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return apply_xmlnode_text (gncOrderSetID, pdata->order, node);
-}
-
-static gboolean
-order_owner_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-    GncOwner owner;
-    gboolean ret;
-
-    ret = gnc_dom_tree_to_owner (node, &owner, pdata->book);
-    if (ret)
-        gncOrderSetOwner (pdata->order, &owner);
-
-    return ret;
-}
-
-static gboolean
-order_opened_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return set_time64 (node, pdata->order, gncOrderSetDateOpened);
-}
-
-static gboolean
-order_closed_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return set_time64 (node, pdata->order, gncOrderSetDateClosed);
-}
-
-static gboolean
-order_notes_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return apply_xmlnode_text (gncOrderSetNotes, pdata->order, node);
-}
-
-static gboolean
-order_reference_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return apply_xmlnode_text (gncOrderSetReference, pdata->order, node);
-}
-
-static gboolean
-order_active_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-    gint64 val;
-    gboolean ret;
-
-    ret = dom_tree_to_integer (node, &val);
-    if (ret)
-        gncOrderSetActive (pdata->order, (gboolean)val);
-
-    return ret;
-}
-
-static gboolean
-order_slots_handler (xmlNodePtr node, gpointer order_pdata)
-{
-    struct order_pdata* pdata = static_cast<decltype (pdata)> (order_pdata);
-
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->order));
-}
-
-static struct dom_tree_handler order_handlers_v2[] =
-{
-    { order_guid_string, order_guid_handler, 1, 0 },
-    { order_id_string, order_id_handler, 1, 0 },
-    { order_owner_string, order_owner_handler, 1, 0 },
-    { order_opened_string, order_opened_handler, 1, 0 },
-    { order_closed_string, order_closed_handler, 0, 0 },
-    { order_notes_string, order_notes_handler, 0, 0 },
-    { order_reference_string, order_reference_handler, 0, 0 },
-    { order_active_string, order_active_handler, 1, 0 },
-    { order_slots_string, order_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncOrder*
-dom_tree_to_order (xmlNodePtr node, QofBook* book)
-{
-    struct order_pdata order_pdata;
-    gboolean successful;
-
-    order_pdata.order = gncOrderCreate (book);
-    order_pdata.book = book;
-    gncOrderBeginEdit (order_pdata.order);
-
-    successful = dom_tree_generic_parse (node, order_handlers_v2,
-                                         &order_pdata);
-
-    if (successful)
-        gncOrderCommitEdit (order_pdata.order);
-    else
-    {
-        PERR ("failed to parse order tree");
-        gncOrderDestroy (order_pdata.order);
-        order_pdata.order = NULL;
-    }
-
-    return order_pdata.order;
-}
-
-static gboolean
-gnc_order_end_handler (gpointer data_for_children,
-                       GSList* data_from_children, GSList* sibling_data,
-                       gpointer parent_data, gpointer global_data,
-                       gpointer* result, const gchar* tag)
-{
-    GncOrder* order;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
+        /* Adopt an order that already exists by this guid instead of
+           the fresh one sax_order_start() made. */
+        GncOrder* order = gncOrderLookup (pdata->book, &guid);
+        if (order)
+        {
+            gncOrderDestroy (pdata->order);
+            pdata->order = order;
+            gncOrderBeginEdit (order);
+        }
+        else
+            gncOrderSetGUID (pdata->order, &guid);
         return TRUE;
-    }
+    });
+}
 
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
+static gboolean
+sax_order_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncOrderSetID (pdata->order, txt); return TRUE; });
+}
+
+static gboolean
+sax_order_opened_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST order_opened_string)) t = 0;
+        gncOrderSetDateOpened (pdata->order, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_order_closed_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST order_closed_string)) t = 0;
+        gncOrderSetDateClosed (pdata->order, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_order_notes_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncOrderSetNotes (pdata->order, txt); return TRUE; });
+}
+
+static gboolean
+sax_order_reference_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncOrderSetReference (pdata->order, txt); return TRUE; });
+}
+
+static gboolean
+sax_order_active_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncOrderSetActive (pdata->order, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_order_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                         gpointer parent_data, gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->order));
+    xmlFreeNode (tree);
+    return ret;
+}
+
+static gboolean
+sax_order_owner_start (GSList*, gpointer parent_data, gpointer,
+                       gpointer* data_for_children, gpointer*, const gchar*, gchar**)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (parent_data);
+    auto* ctx = g_new (owner_sax_ctx, 1);
+    ctx->owner = &pdata->owner;
+    ctx->book = pdata->book;
+    *data_for_children = ctx;
+    return TRUE;
+}
+
+static gboolean
+sax_order_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                 gpointer*, const gchar* tag, gchar**)
+{
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new0 (order_sax_pdata, 1);
+    pdata->order = gncOrderCreate (book);
+    pdata->book = book;
+    gncOrderBeginEdit (pdata->order);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_order_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+              gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    order = dom_tree_to_order (tree, book);
-    if (order != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, order);
-    }
+    gncOrderSetOwner (pdata->order, &pdata->owner);
+    gncOrderCommitEdit (pdata->order);
 
-    xmlFreeNode (tree);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, pdata->order);
 
-    return order != NULL;
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_order_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<order_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncOrderDestroy (pdata->order);
+    g_free (pdata);
 }
 
 static sixtp*
 order_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_order_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_order_start,
+        SIXTP_END_HANDLER_ID, sax_order_end,
+        SIXTP_FAIL_HANDLER_ID, sax_order_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        order_guid_string, restore_char_generator (sax_order_guid_end),
+        order_id_string, restore_char_generator (sax_order_id_end),
+        order_notes_string, restore_char_generator (sax_order_notes_end),
+        order_reference_string, restore_char_generator (sax_order_reference_end),
+        order_active_string, restore_char_generator (sax_order_active_end),
+        order_slots_string, sixtp_dom_parser_new_rooted (sax_order_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, order_owner_string, sax_owner_parser_new (sax_order_owner_start));
+    sixtp_add_sub_parser (p, order_opened_string, sax_time64_parser_new (sax_order_opened_ts_end));
+    sixtp_add_sub_parser (p, order_closed_string, sax_time64_parser_new (sax_order_closed_ts_end));
+
+    return p;
 }
 
 static gboolean
