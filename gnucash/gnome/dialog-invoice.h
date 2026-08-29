@@ -119,6 +119,7 @@ void gnc_invoice_window_editCB (GtkWindow* parent, gpointer data);
 void gnc_invoice_window_duplicateInvoiceCB (GtkWindow* parent, gpointer data);
 void gnc_invoice_window_postCB (GtkWidget *widget, gpointer data);
 void gnc_invoice_window_unpostCB (GtkWidget *widget, gpointer data);
+void gnc_invoice_window_delete_invoiceCB (GtkWindow *parent, gpointer data);
 void gnc_invoice_window_recordCB (GtkWidget *widget, gpointer data);
 void gnc_invoice_window_cancelCB (GtkWidget *widget, gpointer data);
 void gnc_invoice_window_deleteCB (GtkWidget *widget, gpointer data);

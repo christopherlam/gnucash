@@ -163,8 +163,35 @@ gnc_job_set_property (GObject         *object,
 static GList*
 impl_get_typed_referring_object_list(const QofInstance* inst, const QofInstance* ref)
 {
-    /* Refers to nothing */
-    return NULL;
+    if (!GNC_IS_CUSTOMER(ref) && !GNC_IS_VENDOR(ref))
+    {
+        return NULL;
+    }
+
+    return qof_instance_get_referring_object_list_from_collection (qof_instance_get_collection (inst), ref);
+}
+
+/** Does this object refer to a specific object */
+static gboolean
+impl_refers_to_object (const QofInstance* inst, const QofInstance* ref)
+{
+    GncJob* job;
+
+    g_return_val_if_fail (inst != NULL, FALSE);
+    g_return_val_if_fail (GNC_IS_JOB(inst), FALSE);
+
+    job = GNC_JOB(inst);
+
+    if (GNC_IS_CUSTOMER(ref))
+    {
+        return (gncOwnerGetCustomer (&job->owner) == GNC_CUSTOMER(ref));
+    }
+    else if (GNC_IS_VENDOR(ref))
+    {
+        return (gncOwnerGetVendor (&job->owner) == GNC_VENDOR(ref));
+    }
+
+    return FALSE;
 }
 
 static void
@@ -179,7 +206,7 @@ gnc_job_class_init (GncJobClass *klass)
     gobject_class->get_property = gnc_job_get_property;
 
     qof_class->get_display_name = NULL;
-    qof_class->refers_to_object = NULL;
+    qof_class->refers_to_object = impl_refers_to_object;
     qof_class->get_typed_referring_object_list = impl_get_typed_referring_object_list;
 
     g_object_class_install_property

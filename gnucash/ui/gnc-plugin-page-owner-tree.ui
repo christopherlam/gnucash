@@ -25,6 +25,12 @@
       <attribute name="tooltip" translatable="yes">Create a new customer</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
+    <item>
+      <attribute name="label" translatable="yes">_Delete Customer</attribute>
+      <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+      <attribute name="tooltip" translatable="yes">Delete the selected customer</attribute>
+      <attribute name="temp" translatable="no">yes</attribute>
+    </item>
   </menu>
 
   <menu id="EditPlaceholder2-v">
@@ -41,6 +47,12 @@
       <attribute name="tooltip" translatable="yes">Create a new vendor</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
+    <item>
+      <attribute name="label" translatable="yes">_Delete Vendor</attribute>
+      <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+      <attribute name="tooltip" translatable="yes">Delete the selected vendor</attribute>
+      <attribute name="temp" translatable="no">yes</attribute>
+    </item>
   </menu>
 
   <menu id="EditPlaceholder2-e">
@@ -55,6 +67,12 @@
       <attribute name="label" translatable="yes">_New Employee…</attribute>
       <attribute name="action">GncPluginPageOwnerTreeActions.OTNewEmployeeAction</attribute>
       <attribute name="tooltip" translatable="yes">Create a new employee</attribute>
+      <attribute name="temp" translatable="no">yes</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">_Delete Employee</attribute>
+      <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+      <attribute name="tooltip" translatable="yes">Delete the selected employee</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
   </menu>
@@ -153,6 +171,11 @@
         <attribute name="action">GncPluginPageOwnerTreeActions.OTEditCustomerAction</attribute>
         <attribute name="tooltip" translatable="yes">Edit the selected customer</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">_Delete Customer</attribute>
+        <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+        <attribute name="tooltip" translatable="yes">Delete the selected customer</attribute>
+      </item>
     </section>
     <section>
       <item>
@@ -192,6 +215,11 @@
         <attribute name="action">GncPluginPageOwnerTreeActions.OTEditVendorAction</attribute>
         <attribute name="tooltip" translatable="yes">Edit the selected vendor</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">_Delete Vendor</attribute>
+        <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+        <attribute name="tooltip" translatable="yes">Delete the selected vendor</attribute>
+      </item>
     </section>
     <section>
       <item>
@@ -230,6 +258,11 @@
         <attribute name="label" translatable="yes">E_dit Employee</attribute>
         <attribute name="action">GncPluginPageOwnerTreeActions.OTEditEmployeeAction</attribute>
         <attribute name="tooltip" translatable="yes">Edit the selected customer</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_Delete Employee</attribute>
+        <attribute name="action">GncPluginPageOwnerTreeActions.EditDeleteOwnerAction</attribute>
+        <attribute name="tooltip" translatable="yes">Delete the selected employee</attribute>
       </item>
     </section>
     <section>
