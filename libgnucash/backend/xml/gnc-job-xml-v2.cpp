@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gncJobP.h"
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -45,8 +46,6 @@
 #include "xml-helpers.h"
 
 #define _GNC_MOD_NAME   GNC_ID_JOB
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* job_version_string = "2.0.0";
 
@@ -93,173 +92,180 @@ job_dom_tree_create (GncJob* job)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) job parser: reads a gnc:GncJob straight off
+   the SAX character stream, with no intermediate xmlNodePtr built for
+   any of its fields. Nothing else in the codebase uses the old
+   DOM-based parser this replaces, so it's gone entirely. */
 
-struct job_pdata
+struct job_sax_pdata
 {
     GncJob* job;
+    GncOwner owner;
     QofBook* book;
 };
 
 static gboolean
-job_name_handler (xmlNodePtr node, gpointer job_pdata)
+sax_job_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
 {
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    return apply_xmlnode_text (gncJobSetName, pdata->job, node);
+        /* Adopt a job that already exists by this guid (e.g. a
+           placeholder created earlier by an owner reference) instead
+           of the fresh one sax_job_start() made. */
+        GncJob* job = gncJobLookup (pdata->book, &guid);
+        if (job)
+        {
+            gncJobDestroy (pdata->job);
+            pdata->job = job;
+            gncJobBeginEdit (job);
+        }
+        else
+            gncJobSetGUID (pdata->job, &guid);
+        return TRUE;
+    });
 }
 
 static gboolean
-job_guid_handler (xmlNodePtr node, gpointer job_pdata)
+sax_job_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                gpointer, gpointer*, const gchar*)
 {
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-    GncJob* job;
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncJobSetID (pdata->job, txt); return TRUE; });
+}
 
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    job = gncJobLookup (pdata->book, &*guid);
-    if (job)
-    {
-        gncJobDestroy (pdata->job);
-        pdata->job = job;
-        gncJobBeginEdit (job);
-    }
-    else
-    {
-        gncJobSetGUID (pdata->job, &*guid);
-    }
+static gboolean
+sax_job_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncJobSetName (pdata->job, txt); return TRUE; });
+}
 
+static gboolean
+sax_job_reference_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncJobSetReference (pdata->job, txt); return TRUE; });
+}
+
+static gboolean
+sax_job_active_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncJobSetActive (pdata->job, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_job_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                       gpointer parent_data, gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->job));
+    xmlFreeNode (tree);
+    return ret;
+}
+
+static gboolean
+sax_job_owner_start (GSList*, gpointer parent_data, gpointer,
+                     gpointer* data_for_children, gpointer*, const gchar*, gchar**)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (parent_data);
+    auto* ctx = g_new (owner_sax_ctx, 1);
+    ctx->owner = &pdata->owner;
+    ctx->book = pdata->book;
+    *data_for_children = ctx;
     return TRUE;
 }
 
 static gboolean
-job_id_handler (xmlNodePtr node, gpointer job_pdata)
+sax_job_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+              gpointer*, const gchar* tag, gchar**)
 {
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-
-    return apply_xmlnode_text (gncJobSetID, pdata->job, node);
-}
-
-static gboolean
-job_reference_handler (xmlNodePtr node, gpointer job_pdata)
-{
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-
-    return apply_xmlnode_text (gncJobSetReference, pdata->job, node);
-}
-
-static gboolean
-job_owner_handler (xmlNodePtr node, gpointer job_pdata)
-{
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-    GncOwner owner;
-    gboolean ret;
-
-    ret = gnc_dom_tree_to_owner (node, &owner, pdata->book);
-    if (ret)
-        gncJobSetOwner (pdata->job, &owner);
-
-    return ret;
-}
-
-static gboolean
-job_active_handler (xmlNodePtr node, gpointer job_pdata)
-{
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-    gint64 val;
-    gboolean ret;
-
-    ret = dom_tree_to_integer (node, &val);
-    if (ret)
-        gncJobSetActive (pdata->job, (gboolean)val);
-
-    return ret;
-}
-
-static gboolean
-job_slots_handler (xmlNodePtr node, gpointer job_pdata)
-{
-    struct job_pdata* pdata = static_cast<decltype (pdata)> (job_pdata);
-
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->job));
-}
-
-static struct dom_tree_handler job_handlers_v2[] =
-{
-    { job_guid_string, job_guid_handler, 1, 0 },
-    { job_id_string, job_id_handler, 1, 0 },
-    { job_name_string, job_name_handler, 1, 0 },
-    { job_reference_string, job_reference_handler, 0, 0 },
-    { job_owner_string, job_owner_handler, 1, 0 },
-    { job_active_string, job_active_handler, 1, 0 },
-    { job_slots_string, job_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncJob*
-dom_tree_to_job (xmlNodePtr node, QofBook* book)
-{
-    struct job_pdata job_pdata;
-    gboolean successful;
-
-    job_pdata.job = gncJobCreate (book);
-    job_pdata.book = book;
-    gncJobBeginEdit (job_pdata.job);
-
-    successful = dom_tree_generic_parse (node, job_handlers_v2,
-                                         &job_pdata);
-
-    if (successful)
-        gncJobCommitEdit (job_pdata.job);
-    else
-    {
-        PERR ("failed to parse job tree");
-        gncJobDestroy (job_pdata.job);
-        job_pdata.job = NULL;
-    }
-
-    return job_pdata.job;
-}
-
-static gboolean
-gnc_job_end_handler (gpointer data_for_children,
-                     GSList* data_from_children, GSList* sibling_data,
-                     gpointer parent_data, gpointer global_data,
-                     gpointer* result, const gchar* tag)
-{
-    GncJob* job;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new0 (job_sax_pdata, 1);
+    pdata->job = gncJobCreate (book);
+    pdata->book = book;
+    gncJobBeginEdit (pdata->job);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_job_end (gpointer data_for_children, GSList*, GSList*, gpointer parent_data,
+            gpointer global_data, gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    job = dom_tree_to_job (tree, book);
-    if (job != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, job);
-    }
+    gncJobSetOwner (pdata->job, &pdata->owner);
+    gncJobCommitEdit (pdata->job);
 
-    xmlFreeNode (tree);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, pdata->job);
 
-    return job != NULL;
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_job_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+             gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<job_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncJobDestroy (pdata->job);
+    g_free (pdata);
 }
 
 static sixtp*
 job_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_job_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_job_start,
+        SIXTP_END_HANDLER_ID, sax_job_end,
+        SIXTP_FAIL_HANDLER_ID, sax_job_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        job_guid_string, restore_char_generator (sax_job_guid_end),
+        job_id_string, restore_char_generator (sax_job_id_end),
+        job_name_string, restore_char_generator (sax_job_name_end),
+        job_reference_string, restore_char_generator (sax_job_reference_end),
+        job_active_string, restore_char_generator (sax_job_active_end),
+        job_slots_string, sixtp_dom_parser_new_rooted (sax_job_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, job_owner_string, sax_owner_parser_new (sax_job_owner_start));
+
+    return p;
 }
 
 static gboolean
