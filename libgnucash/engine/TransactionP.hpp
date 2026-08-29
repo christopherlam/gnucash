@@ -98,6 +98,14 @@ struct transaction_s
 
     std::vector<Split*> splits; /* list of split pointers */
 
+    /* Scratch GList mirroring 'splits', owned by the transaction. The QOF
+     * query engine walks parameter chains without freeing the intermediate
+     * results, so the TRANS_SPLITLIST accessor cannot hand it a list the
+     * caller would have to free. This is rebuilt (and the previous one
+     * freed) on each such access, and freed with the transaction. It is
+     * only valid until the next access; nothing else may use it. */
+    GList *splits_qof_scratch;
+
     /* marker is used to track the progress of transaction traversals.
      * 0 is never a legitimate marker value, so we can tell is we hit
      * a new transaction in the middle of a traversal. All each new

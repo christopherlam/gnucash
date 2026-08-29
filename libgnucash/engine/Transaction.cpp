@@ -266,6 +266,7 @@ gnc_transaction_init(Transaction* trans)
     trans->description = CACHE_INSERT("");
     trans->common_currency = nullptr;
     new (&trans->splits) SplitsVec ();
+    trans->splits_qof_scratch = nullptr;
     trans->date_entered  = 0;
     trans->date_posted  = 0;
     trans->marker = 0;
@@ -283,7 +284,10 @@ gnc_transaction_dispose(GObject *txnp)
 static void
 gnc_transaction_finalize(GObject* txnp)
 {
-    GNC_TRANSACTION(txnp)->splits.~SplitsVec();
+    auto trans{GNC_TRANSACTION(txnp)};
+    g_list_free (trans->splits_qof_scratch);
+    trans->splits_qof_scratch = nullptr;
+    trans->splits.~SplitsVec();
     G_OBJECT_CLASS(gnc_transaction_parent_class)->finalize(txnp);
 }
 
@@ -758,6 +762,8 @@ xaccFreeTransaction (Transaction *trans)
     for (Split *s : trans->splits)
         xaccFreeSplit (s);
     trans->splits.clear ();
+    g_list_free (trans->splits_qof_scratch);
+    trans->splits_qof_scratch = nullptr;
 
     /* free up transaction strings */
     CACHE_REMOVE(trans->num);
@@ -2105,6 +2111,26 @@ xaccTransGetSplitList (const Transaction *trans)
                             static_cast<GList*>(nullptr), g_list_prepend);
 }
 
+/* QOF parameter accessor for TRANS_SPLITLIST.
+ *
+ * This can't just be xaccTransGetSplitList(): the QOF query engine walks a
+ * parameter chain (see qof_query_run_internal) reassigning the intermediate
+ * result without ever freeing it, so an accessor that allocates would leak a
+ * list per transaction per predicate evaluation. Hand back a list owned by
+ * the transaction instead, rebuilding it (and releasing the previous one) on
+ * each call. The query engine consumes it immediately, which is all this
+ * lifetime supports. */
+static SplitList *
+qofTransGetSplitList (Transaction *trans)
+{
+    if (!trans) return nullptr;
+    g_list_free (trans->splits_qof_scratch);
+    trans->splits_qof_scratch =
+        std::accumulate (trans->splits.rbegin(), trans->splits.rend(),
+                         static_cast<GList*>(nullptr), g_list_prepend);
+    return trans->splits_qof_scratch;
+}
+
 const SplitsVec&
 xaccTransGetSplits (const Transaction *trans)
 {
@@ -2930,7 +2956,7 @@ gboolean xaccTransRegister (void)
             },
             {
                 TRANS_SPLITLIST, GNC_ID_SPLIT,
-                (QofAccessFunc)xaccTransGetSplitList, nullptr
+                (QofAccessFunc)qofTransGetSplitList, nullptr
             },
             {
                 QOF_PARAM_BOOK, QOF_ID_BOOK,
