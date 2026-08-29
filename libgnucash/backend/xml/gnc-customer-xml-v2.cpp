@@ -30,6 +30,8 @@
 #include "gncBillTermP.h"
 #include "gncCustomerP.h"
 #include "gncTaxTableP.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
 
 #include "gnc-xml-helper.h"
 #include "gnc-customer-xml-v2.h"
@@ -49,8 +51,6 @@
 #include "xml-helpers.h"
 
 #define _GNC_MOD_NAME   GNC_ID_CUSTOMER
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* customer_version_string = "2.0.0";
 
@@ -138,284 +138,326 @@ customer_dom_tree_create (GncCustomer* cust)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) customer parser: reads a gnc:GncCustomer
+   straight off the SAX character stream, with no intermediate
+   xmlNodePtr built for any of its fields. Nothing else in the
+   codebase uses the old DOM-based parser this replaces, so it's gone
+   entirely. */
 
-struct customer_pdata
+struct customer_sax_pdata
 {
     GncCustomer* customer;
     QofBook* book;
 };
 
+static gboolean
+sax_cust_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                   gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        /* Adopt a customer that already exists by this guid (e.g. a
+           placeholder created earlier by an owner or invoice
+           reference) instead of the fresh one sax_customer_start()
+           made. */
+        GncCustomer* cust = gncCustomerLookup (pdata->book, &guid);
+        if (cust)
+        {
+            gncCustomerDestroy (pdata->customer);
+            pdata->customer = cust;
+            gncCustomerBeginEdit (cust);
+        }
+        else
+            gncCustomerSetGUID (pdata->customer, &guid);
+        return TRUE;
+    });
+}
 
 static gboolean
-set_boolean (xmlNodePtr node, GncCustomer* cust,
-             void (*func) (GncCustomer* cust, gboolean b))
+sax_cust_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                   gpointer, gpointer*, const gchar*)
 {
-    gint64 val;
-    gboolean ret;
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncCustomerSetName (pdata->customer, txt); return TRUE; });
+}
 
-    ret = dom_tree_to_integer (node, &val);
-    if (ret)
-        func (cust, (gboolean)val);
+static gboolean
+sax_cust_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                 gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncCustomerSetID (pdata->customer, txt); return TRUE; });
+}
 
+static gboolean
+sax_cust_notes_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncCustomerSetNotes (pdata->customer, txt); return TRUE; });
+}
+
+static gboolean
+sax_cust_terms_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        GncBillTerm* term = gnc_billterm_xml_find_or_create (pdata->book, &guid);
+        g_assert (term);
+        gncCustomerSetTerms (pdata->customer, term);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_taxincluded_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                          gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncTaxIncluded type;
+        if (gncTaxIncludedStringToType (txt, &type))
+            gncCustomerSetTaxIncluded (pdata->customer, type);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_active_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncCustomerSetActive (pdata->customer, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_discount_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncCustomerSetDiscount (pdata->customer, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_credit_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncCustomerSetCredit (pdata->customer, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_taxtable_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        GncTaxTable* taxtable = gncTaxTableLookup (pdata->book, &guid);
+        if (!taxtable)
+        {
+            taxtable = gncTaxTableCreate (pdata->book);
+            gncTaxTableBeginEdit (taxtable);
+            gncTaxTableSetGUID (taxtable, &guid);
+            gncTaxTableCommitEdit (taxtable);
+        }
+        else
+            gncTaxTableDecRef (taxtable);
+
+        gncCustomerSetTaxTable (pdata->customer, taxtable);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_taxtableoverride_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                               gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncCustomerSetTaxTableOverride (pdata->customer, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cust_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                        gpointer parent_data, gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->customer));
+    xmlFreeNode (tree);
     return ret;
 }
 
 static gboolean
-customer_name_handler (xmlNodePtr node, gpointer cust_pdata)
+sax_cust_addr_start (GSList*, gpointer parent_data, gpointer,
+                     gpointer* data_for_children, gpointer*, const gchar*, gchar**)
 {
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    return apply_xmlnode_text (gncCustomerSetName, pdata->customer, node);
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    *data_for_children = gncCustomerGetAddr (pdata->customer);
+    return TRUE;
 }
 
 static gboolean
-customer_guid_handler (xmlNodePtr node, gpointer cust_pdata)
+sax_cust_shipaddr_start (GSList*, gpointer parent_data, gpointer,
+                         gpointer* data_for_children, gpointer*, const gchar*, gchar**)
 {
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    GncCustomer* cust;
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    *data_for_children = gncCustomerGetShipAddr (pdata->customer);
+    return TRUE;
+}
 
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    cust = gncCustomerLookup (pdata->book, &*guid);
-    if (cust)
+static gboolean
+sax_cust_currency_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
+
+    for (GSList* lp = dfc; lp; lp = lp->next)
     {
-        gncCustomerDestroy (pdata->customer);
-        pdata->customer = cust;
-        gncCustomerBeginEdit (cust);
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
     }
-    else
+
+    gnc_commodity* com = nullptr;
+    if (space && id)
     {
-        gncCustomerSetGUID (pdata->customer, &*guid);
+        g_strstrip (space);
+        g_strstrip (id);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        if (table)
+            com = gnc_commodity_table_lookup (table, space, id);
     }
-
-    return TRUE;
-}
-
-static gboolean
-customer_id_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    return apply_xmlnode_text (gncCustomerSetID, pdata->customer, node);
-}
-
-static gboolean
-customer_notes_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    return apply_xmlnode_text (gncCustomerSetNotes, pdata->customer, node);
-}
-
-static gboolean
-customer_terms_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    GncBillTerm* term;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    term = gnc_billterm_xml_find_or_create (pdata->book, &*guid);
-    g_assert (term);
-    gncCustomerSetTerms (pdata->customer, term);
-
-    return TRUE;
-}
-
-static gboolean
-customer_addr_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    return gnc_dom_tree_to_address (node, gncCustomerGetAddr (pdata->customer));
-}
-
-static gboolean
-customer_shipaddr_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    return gnc_dom_tree_to_address (node,
-                                    gncCustomerGetShipAddr (pdata->customer));
-}
-
-
-static gboolean
-customer_taxincluded_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    auto set_tax_included = [](GncCustomer* cust, const char *str)
-    {
-        GncTaxIncluded type;
-        if (gncTaxIncludedStringToType (str, &type))
-            gncCustomerSetTaxIncluded (cust, type);
-    };
-    return apply_xmlnode_text (set_tax_included, pdata->customer, node);
-}
-
-static gboolean
-customer_active_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    return set_boolean (node, pdata->customer, gncCustomerSetActive);
-}
-
-static gboolean
-customer_discount_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    gncCustomerSetDiscount (pdata->customer, dom_tree_to_gnc_numeric (node));
-    return TRUE;
-}
-
-static gboolean
-customer_credit_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-
-    gncCustomerSetCredit (pdata->customer, dom_tree_to_gnc_numeric (node));
-    return TRUE;
-}
-
-static gboolean
-customer_currency_handler (xmlNodePtr node, gpointer customer_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (customer_pdata);
-    gnc_commodity* com;
-
-    com = dom_tree_to_commodity_ref (node, pdata->book);
     g_return_val_if_fail (com, FALSE);
-
     gncCustomerSetCurrency (pdata->customer, com);
-
     return TRUE;
 }
 
 static gboolean
-customer_taxtable_handler (xmlNodePtr node, gpointer cust_pdata)
+sax_cust_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                gpointer*, const gchar* tag, gchar**)
 {
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    GncTaxTable* taxtable;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    taxtable = gncTaxTableLookup (pdata->book, &*guid);
-    if (!taxtable)
-    {
-        taxtable = gncTaxTableCreate (pdata->book);
-        gncTaxTableBeginEdit (taxtable);
-        gncTaxTableSetGUID (taxtable, &*guid);
-        gncTaxTableCommitEdit (taxtable);
-    }
-    else
-        gncTaxTableDecRef (taxtable);
-
-    gncCustomerSetTaxTable (pdata->customer, taxtable);
-    return TRUE;
-}
-
-static gboolean
-customer_taxtableoverride_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    return set_boolean (node, pdata->customer, gncCustomerSetTaxTableOverride);
-}
-
-static gboolean
-customer_slots_handler (xmlNodePtr node, gpointer cust_pdata)
-{
-    struct customer_pdata* pdata = static_cast<decltype (pdata)> (cust_pdata);
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->customer));
-}
-
-static struct dom_tree_handler customer_handlers_v2[] =
-{
-    { cust_name_string, customer_name_handler, 1, 0 },
-    { cust_guid_string, customer_guid_handler, 1, 0 },
-    { cust_id_string, customer_id_handler, 1, 0 },
-    { cust_addr_string, customer_addr_handler, 1, 0 },
-    { cust_shipaddr_string, customer_shipaddr_handler, 1, 0 },
-    { cust_notes_string, customer_notes_handler, 0, 0 },
-    { cust_terms_string, customer_terms_handler, 0, 0 },
-    { cust_taxincluded_string, customer_taxincluded_handler, 1, 0 },
-    { cust_active_string, customer_active_handler, 1, 0 },
-    { cust_discount_string, customer_discount_handler, 1, 0 },
-    { cust_credit_string, customer_credit_handler, 1, 0 },
-    { cust_currency_string, customer_currency_handler, 0, 0 }, /* XXX */
-    { "cust:commodity", customer_currency_handler, 0, 0 }, /* XXX */
-    { cust_taxtable_string, customer_taxtable_handler, 0, 0 },
-    { cust_taxtableoverride_string, customer_taxtableoverride_handler, 0, 0 },
-    { cust_slots_string, customer_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncCustomer*
-dom_tree_to_customer (xmlNodePtr node, QofBook* book)
-{
-    struct customer_pdata cust_pdata;
-    gboolean successful;
-
-    cust_pdata.customer = gncCustomerCreate (book);
-    cust_pdata.book = book;
-    gncCustomerBeginEdit (cust_pdata.customer);
-
-    successful = dom_tree_generic_parse (node, customer_handlers_v2,
-                                         &cust_pdata);
-
-    if (successful)
-        gncCustomerCommitEdit (cust_pdata.customer);
-    else
-    {
-        PERR ("failed to parse customer tree");
-        gncCustomerDestroy (cust_pdata.customer);
-        cust_pdata.customer = NULL;
-    }
-
-    return cust_pdata.customer;
-}
-
-static gboolean
-gnc_customer_end_handler (gpointer data_for_children,
-                          GSList* data_from_children, GSList* sibling_data,
-                          gpointer parent_data, gpointer global_data,
-                          gpointer* result, const gchar* tag)
-{
-    GncCustomer* cust;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new (customer_sax_pdata, 1);
+    pdata->customer = gncCustomerCreate (book);
+    pdata->book = book;
+    gncCustomerBeginEdit (pdata->customer);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_cust_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+             gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    cust = dom_tree_to_customer (tree, book);
-    if (cust != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, cust);
-    }
+    GncCustomer* cust = pdata->customer;
+    g_free (pdata);
 
-    xmlFreeNode (tree);
+    gncCustomerCommitEdit (cust);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, cust);
+    return TRUE;
+}
 
-    return cust != NULL;
+static void
+sax_cust_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+              gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<customer_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncCustomerDestroy (pdata->customer);
+    g_free (pdata);
 }
 
 static sixtp*
 customer_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_customer_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_cust_start,
+        SIXTP_END_HANDLER_ID, sax_cust_end,
+        SIXTP_FAIL_HANDLER_ID, sax_cust_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        cust_guid_string, restore_char_generator (sax_cust_guid_end),
+        cust_name_string, restore_char_generator (sax_cust_name_end),
+        cust_id_string, restore_char_generator (sax_cust_id_end),
+        cust_notes_string, restore_char_generator (sax_cust_notes_end),
+        cust_terms_string, restore_char_generator (sax_cust_terms_end),
+        cust_taxincluded_string, restore_char_generator (sax_cust_taxincluded_end),
+        cust_active_string, restore_char_generator (sax_cust_active_end),
+        cust_discount_string, restore_char_generator (sax_cust_discount_end),
+        cust_credit_string, restore_char_generator (sax_cust_credit_end),
+        cust_taxtable_string, restore_char_generator (sax_cust_taxtable_end),
+        cust_taxtableoverride_string, restore_char_generator (sax_cust_taxtableoverride_end),
+        cust_slots_string, sixtp_dom_parser_new_rooted (sax_cust_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, cust_addr_string, sax_address_parser_new (sax_cust_addr_start));
+    sixtp_add_sub_parser (p, cust_shipaddr_string, sax_address_parser_new (sax_cust_shipaddr_start));
+
+    {
+        sixtp* cmdty = sax_commodity_ref_parser_new (sax_cust_currency_end);
+        sixtp_add_sub_parser (p, cust_currency_string, cmdty);
+        sixtp_add_sub_parser (p, "cust:commodity", cmdty);
+    }
+
+    return p;
 }
 
 static gboolean
