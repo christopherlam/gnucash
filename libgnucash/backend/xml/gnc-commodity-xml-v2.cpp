@@ -115,79 +115,6 @@ gnc_commodity_dom_tree_create (const gnc_commodity* com)
 
 /***********************************************************************/
 
-struct com_char_handler
-{
-    const char* tag;
-    void (*func) (gnc_commodity* com, const char* val);
-};
-
-struct com_char_handler com_handlers[] =
-{
-    { cmdty_namespace,    gnc_commodity_set_namespace },
-    { cmdty_id,           gnc_commodity_set_mnemonic },
-    { cmdty_name,         gnc_commodity_set_fullname },
-    { cmdty_xcode,        gnc_commodity_set_cusip },
-    { cmdty_quote_tz,     gnc_commodity_set_quote_tz },
-    { 0, 0 }
-};
-
-static void
-set_commodity_value (xmlNodePtr node, gnc_commodity* com)
-{
-    if (g_strcmp0 ((char*) node->name, cmdty_fraction) == 0)
-    {
-        gint64 val;
-        char* string;
-
-        string = (char*) xmlNodeGetContent (node->xmlChildrenNode);
-        if (string_to_gint64 (string, &val))
-        {
-            gnc_commodity_set_fraction (com, val);
-        }
-        xmlFree (string);
-    }
-    else if (g_strcmp0 ((char*)node->name, cmdty_get_quotes) == 0)
-    {
-        gnc_commodity_set_quote_flag (com, TRUE);
-    }
-    else if (g_strcmp0 ((char*)node->name, cmdty_quote_source) == 0)
-    {
-        gnc_quote_source* source;
-        char* string;
-
-        string = (char*) xmlNodeGetContent (node->xmlChildrenNode);
-        source = gnc_quote_source_lookup_by_internal (string);
-        if (!source)
-            source = gnc_quote_source_add_new (string, FALSE);
-        gnc_commodity_set_quote_source (com, source);
-        xmlFree (string);
-    }
-    else if (g_strcmp0 ((char*)node->name, cmdty_slots) == 0)
-    {
-        /* We ignore the results here */
-        dom_tree_create_instance_slots (node, QOF_INSTANCE (com));
-    }
-    else
-    {
-        struct com_char_handler* mark;
-
-        auto call_commodity_handler = [&](gnc_commodity* com, const char* txt)
-        {
-            auto val = gnc_strstrip (txt);
-            (mark->func) (com, val.c_str());
-        };
-
-        for (mark = com_handlers; mark->tag; mark++)
-        {
-            if (g_strcmp0 (mark->tag, (char*)node->name) == 0)
-            {
-                if (apply_xmlnode_text (call_commodity_handler, com, node))
-                    break;
-            }
-        }
-    }
-}
-
 static gboolean
 valid_commodity (gnc_commodity* com)
 {
@@ -209,94 +136,238 @@ valid_commodity (gnc_commodity* com)
     return TRUE;
 }
 
-static gnc_commodity*
-gnc_commodity_find_currency (QofBook* book, xmlNodePtr tree)
+/***********************************************************************/
+/* SAX-direct (streaming) commodity parser.
+ *
+ * Reads a gnc:commodity straight off the SAX character stream, with no
+ * intermediate xmlNodePtr built for any of its fields. Only cmdty:slots
+ * (a kvp frame) still goes through a narrowly scoped DOM sub-parser.
+ *
+ * If this element declares an ISO currency that already exists in the
+ * book's commodity table, its fields should default to that existing
+ * commodity's before this element's own fields are applied as
+ * overrides. maybe_apply_currency_defaults() below runs that check the
+ * moment both cmdty:space and cmdty:id have been seen; this writer
+ * always emits namespace and id first, so nothing else has been
+ * applied to the new commodity yet at that point.
+ */
+
+struct commodity_sax_pdata
 {
-    gnc_commodity_table* table;
-    gnc_commodity* currency = NULL;
-    gchar* exchange = NULL, *mnemonic = NULL;
-    xmlNodePtr node;
+    gnc_commodity* com;
+    QofBook* book;
+    gboolean has_namespace;
+    gboolean has_id;
+    gboolean checked_currency_defaults;
+};
 
-    for (node = tree->xmlChildrenNode; node; node = node->next)
+static void
+maybe_apply_currency_defaults (commodity_sax_pdata* pdata)
+{
+    if (pdata->checked_currency_defaults ||
+        !pdata->has_namespace || !pdata->has_id)
+        return;
+    pdata->checked_currency_defaults = TRUE;
+
+    const char* exchange = gnc_commodity_get_namespace (pdata->com);
+    const char* mnemonic = gnc_commodity_get_mnemonic (pdata->com);
+    if (exchange && gnc_commodity_namespace_is_iso (exchange) && mnemonic)
     {
-        if (g_strcmp0 ((char*) node->name, cmdty_namespace) == 0)
-            exchange = (gchar*) xmlNodeGetContent (node->xmlChildrenNode);
-        if (g_strcmp0 ((char*) node->name, cmdty_id) == 0)
-            mnemonic = (gchar*) xmlNodeGetContent (node->xmlChildrenNode);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        gnc_commodity* old_com = gnc_commodity_table_lookup (table, exchange, mnemonic);
+        if (old_com)
+            gnc_commodity_copy (pdata->com, old_com);
     }
-
-    if (exchange
-        && gnc_commodity_namespace_is_iso (exchange)
-        && mnemonic)
-    {
-        table = gnc_commodity_table_get_table (book);
-        currency = gnc_commodity_table_lookup (table, exchange, mnemonic);
-    }
-
-    if (exchange)
-        xmlFree (exchange);
-    if (mnemonic)
-        xmlFree (mnemonic);
-
-    return currency;
 }
 
 static gboolean
-gnc_commodity_end_handler (gpointer data_for_children,
-                           GSList* data_from_children, GSList* sibling_data,
-                           gpointer parent_data, gpointer global_data,
-                           gpointer* result, const gchar* tag)
+sax_cmdty_namespace_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
 {
-    gnc_commodity* com, *old_com;
-    xmlNodePtr achild;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (char* txt) -> gboolean
     {
+        gnc_commodity_set_namespace (pdata->com, g_strstrip (txt));
+        pdata->has_namespace = TRUE;
+        maybe_apply_currency_defaults (pdata);
         return TRUE;
-    }
+    });
+}
 
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
+static gboolean
+sax_cmdty_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (char* txt) -> gboolean
+    {
+        gnc_commodity_set_mnemonic (pdata->com, g_strstrip (txt));
+        pdata->has_id = TRUE;
+        maybe_apply_currency_defaults (pdata);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cmdty_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (char* txt) -> gboolean
+    { gnc_commodity_set_fullname (pdata->com, g_strstrip (txt)); return TRUE; });
+}
+
+static gboolean
+sax_cmdty_xcode_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (char* txt) -> gboolean
+    { gnc_commodity_set_cusip (pdata->com, g_strstrip (txt)); return TRUE; });
+}
+
+static gboolean
+sax_cmdty_fraction_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val;
+        if (string_to_gint64 (txt, &val))
+            gnc_commodity_set_fraction (pdata->com, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cmdty_get_quotes_end (gpointer, GSList*, GSList*, gpointer parent_data,
+                          gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    gnc_commodity_set_quote_flag (pdata->com, TRUE);
+    return TRUE;
+}
+
+static gboolean
+sax_cmdty_quote_source_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_quote_source* source = gnc_quote_source_lookup_by_internal (txt);
+        if (!source)
+            source = gnc_quote_source_add_new (txt, FALSE);
+        gnc_commodity_set_quote_source (pdata->com, source);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_cmdty_quote_tz_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (char* txt) -> gboolean
+    { gnc_commodity_set_quote_tz (pdata->com, g_strstrip (txt)); return TRUE; });
+}
+
+static gboolean
+sax_cmdty_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                         gpointer parent_data, gpointer, gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    if (tree)
+    {
+        /* Slot parsing errors aren't treated as fatal for the commodity. */
+        dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->com));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return TRUE;
+}
+
+static gboolean
+sax_cmdty_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                 gpointer*, const gchar* tag, gchar**)
+{
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new0 (commodity_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->com = gnc_commodity_new (pdata->book, NULL, NULL, NULL, NULL, 0);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_cmdty_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+              gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
 
-    com = gnc_commodity_new (book, NULL, NULL, NULL, NULL, 0);
-    old_com = gnc_commodity_find_currency (book, tree);
-    if (old_com)
-        gnc_commodity_copy (com, old_com);
+    if (!tag)
+        return TRUE;
 
-    for (achild = tree->xmlChildrenNode; achild; achild = achild->next)
-    {
-        set_commodity_value (achild, com);
-    }
+    gnc_commodity* com = pdata->com;
+    g_free (pdata);
 
     if (!valid_commodity (com))
     {
         PWARN ("Invalid commodity parsed");
-        xmlElemDump (stdout, NULL, tree);
-        printf ("\n");
-        fflush (stdout);
         gnc_commodity_destroy (com);
         return FALSE;
     }
 
     gdata->cb (tag, gdata->parsedata, com);
-
-    xmlFreeNode (tree);
-
     return TRUE;
 }
 
+static void
+sax_cmdty_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<commodity_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gnc_commodity_destroy (pdata->com);
+    g_free (pdata);
+}
 
 sixtp*
 gnc_commodity_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_commodity_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_cmdty_start,
+        SIXTP_END_HANDLER_ID, sax_cmdty_end,
+        SIXTP_FAIL_HANDLER_ID, sax_cmdty_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        cmdty_namespace, restore_char_generator (sax_cmdty_namespace_end),
+        cmdty_id, restore_char_generator (sax_cmdty_id_end),
+        cmdty_name, restore_char_generator (sax_cmdty_name_end),
+        cmdty_xcode, restore_char_generator (sax_cmdty_xcode_end),
+        cmdty_fraction, restore_char_generator (sax_cmdty_fraction_end),
+        cmdty_get_quotes, restore_char_generator (sax_cmdty_get_quotes_end),
+        cmdty_quote_source, restore_char_generator (sax_cmdty_quote_source_end),
+        cmdty_quote_tz, restore_char_generator (sax_cmdty_quote_tz_end),
+        cmdty_slots, sixtp_dom_parser_new_rooted (sax_cmdty_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    /* Self-reference under our own tag: see the equivalent comment in
+       gnc_transaction_sixtp_parser_create() in gnc-transaction-xml-v2.cpp. */
+    sixtp_add_sub_parser (p, gnc_commodity_string, p);
+
+    return p;
 }
