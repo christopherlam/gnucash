@@ -24,9 +24,25 @@
 #define GNC_OWNER_XML_V2_H
 #include "gncOwner.h"
 #include "qof.h"
+#include "sixtp.h"
 gboolean   gnc_dom_tree_to_owner (xmlNodePtr node, GncOwner* owner,
                                   QofBook* book);
 xmlNodePtr gnc_owner_to_dom_tree (const char* tag, const GncOwner* addr);
 void gnc_owner_xml_initialize (void);
+
+/* A SAX-direct (streaming) sub-parser for a nested owner element (a
+ * type tag plus a guid reference to the customer/job/vendor/employee
+ * of that type). start's job is to resolve the caller's own
+ * parent_data down to the target GncOwner and QofBook, g_new() an
+ * owner_sax_ctx holding them, and pass it on as data_for_children;
+ * sax_owner_parser_new() takes care of freeing it once the owner
+ * element closes. */
+struct owner_sax_ctx
+{
+    GncOwner* owner;
+    QofBook* book;
+};
+
+sixtp* sax_owner_parser_new (sixtp_start_handler start);
 
 #endif /* GNC_OWNER_XML_V2_H */

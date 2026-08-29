@@ -30,6 +30,7 @@
 #include "gncJobP.h"
 #include "gncVendorP.h"
 #include "gncEmployeeP.h"
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -202,6 +203,116 @@ gnc_dom_tree_to_owner (xmlNodePtr node, GncOwner* owner, QofBook* book)
     }
 
     return successful;
+}
+
+/***********************************************************************/
+/* SAX-direct (streaming) owner sub-parser: see gnc-owner-xml-v2.h. */
+
+static gboolean
+sax_owner_type_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* ctx = static_cast<owner_sax_ctx*> (parent_data);
+    return sax_apply_chars (dfc, [ctx] (const char* txt) -> gboolean
+    {
+        if (!g_strcmp0 (txt, GNC_ID_CUSTOMER))
+            gncOwnerInitCustomer (ctx->owner, NULL);
+        else if (!g_strcmp0 (txt, GNC_ID_JOB))
+            gncOwnerInitJob (ctx->owner, NULL);
+        else if (!g_strcmp0 (txt, GNC_ID_VENDOR))
+            gncOwnerInitVendor (ctx->owner, NULL);
+        else if (!g_strcmp0 (txt, GNC_ID_EMPLOYEE))
+            gncOwnerInitEmployee (ctx->owner, NULL);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_owner_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* ctx = static_cast<owner_sax_ctx*> (parent_data);
+    return sax_apply_chars (dfc, [ctx] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        switch (gncOwnerGetType (ctx->owner))
+        {
+        case GNC_OWNER_CUSTOMER:
+        {
+            GncCustomer* cust = gncCustomerLookup (ctx->book, &guid);
+            if (!cust)
+            {
+                cust = gncCustomerCreate (ctx->book);
+                gncCustomerSetGUID (cust, &guid);
+            }
+            gncOwnerInitCustomer (ctx->owner, cust);
+            break;
+        }
+        case GNC_OWNER_JOB:
+        {
+            GncJob* job = gncJobLookup (ctx->book, &guid);
+            if (!job)
+            {
+                job = gncJobCreate (ctx->book);
+                gncJobSetGUID (job, &guid);
+            }
+            gncOwnerInitJob (ctx->owner, job);
+            break;
+        }
+        case GNC_OWNER_VENDOR:
+        {
+            GncVendor* vendor = gncVendorLookup (ctx->book, &guid);
+            if (!vendor)
+            {
+                vendor = gncVendorCreate (ctx->book);
+                gncVendorSetGUID (vendor, &guid);
+            }
+            gncOwnerInitVendor (ctx->owner, vendor);
+            break;
+        }
+        case GNC_OWNER_EMPLOYEE:
+        {
+            GncEmployee* employee = gncEmployeeLookup (ctx->book, &guid);
+            if (!employee)
+            {
+                employee = gncEmployeeCreate (ctx->book);
+                gncEmployeeSetGUID (employee, &guid);
+            }
+            gncOwnerInitEmployee (ctx->owner, employee);
+            break;
+        }
+        default:
+            PWARN ("Invalid owner type: %d\n", gncOwnerGetType (ctx->owner));
+            return FALSE;
+        }
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_owner_wrapper_end (gpointer data_for_children, GSList*, GSList*, gpointer,
+                       gpointer, gpointer*, const gchar*)
+{
+    g_free (static_cast<owner_sax_ctx*> (data_for_children));
+    return TRUE;
+}
+
+sixtp*
+sax_owner_parser_new (sixtp_start_handler start)
+{
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, start,
+        SIXTP_END_HANDLER_ID, sax_owner_wrapper_end,
+        SIXTP_NO_MORE_HANDLERS);
+
+    return sixtp_add_some_sub_parsers (
+        p, TRUE,
+        owner_type_string, restore_char_generator (sax_owner_type_end),
+        owner_id_string, restore_char_generator (sax_owner_id_end),
+        NULL, NULL);
 }
 
 static gboolean

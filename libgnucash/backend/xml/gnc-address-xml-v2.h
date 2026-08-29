@@ -24,9 +24,21 @@
 #define GNC_ADDRESS_XML_V2_H
 
 #include "gncAddress.h"
+#include "sixtp.h"
 
 gboolean   gnc_dom_tree_to_address (xmlNodePtr node, GncAddress* address);
 xmlNodePtr gnc_address_to_dom_tree (const char* tag, GncAddress* addr);
 void gnc_address_xml_initialize (void);
+
+/* A SAX-direct (streaming) sub-parser for a nested address element
+ * (e.g. cust:addr, vendor:addr): reads addr:name/addr1..4/phone/fax/
+ * email straight off the SAX character stream, with addr:slots (a kvp
+ * frame) on the scoped DOM path. start's job is to resolve the
+ * caller's own parent_data down to the target GncAddress* -- already
+ * allocated and owned by the customer/vendor/employee/... being
+ * parsed -- and pass it on as data_for_children; every address field
+ * handler then receives that GncAddress* directly as its own
+ * parent_data. */
+sixtp* sax_address_parser_new (sixtp_start_handler start);
 
 #endif /* GNC_ADDRESS_XML_V2_H */

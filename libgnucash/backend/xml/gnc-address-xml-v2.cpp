@@ -201,6 +201,120 @@ gnc_dom_tree_to_address (xmlNodePtr node, GncAddress* address)
     return successful;
 }
 
+/***********************************************************************/
+/* SAX-direct (streaming) address sub-parser: see gnc-address-xml-v2.h. */
+
+static gboolean
+sax_addr_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                   gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetName (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_addr1_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetAddr1 (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_addr2_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetAddr2 (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_addr3_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetAddr3 (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_addr4_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetAddr4 (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_phone_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetPhone (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_fax_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetFax (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_email_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    return sax_apply_chars (dfc, [addr] (const char* txt) -> gboolean
+    { gncAddressSetEmail (addr, txt); return TRUE; });
+}
+
+static gboolean
+sax_addr_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                        gpointer parent_data, gpointer, gpointer* result,
+                        const gchar*)
+{
+    auto* addr = static_cast<GncAddress*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (addr));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+sixtp*
+sax_address_parser_new (sixtp_start_handler start)
+{
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, start,
+        SIXTP_NO_MORE_HANDLERS);
+
+    return sixtp_add_some_sub_parsers (
+        p, TRUE,
+        addr_name_string, restore_char_generator (sax_addr_name_end),
+        addr_addr1_string, restore_char_generator (sax_addr_addr1_end),
+        addr_addr2_string, restore_char_generator (sax_addr_addr2_end),
+        addr_addr3_string, restore_char_generator (sax_addr_addr3_end),
+        addr_addr4_string, restore_char_generator (sax_addr_addr4_end),
+        addr_phone_string, restore_char_generator (sax_addr_phone_end),
+        addr_fax_string, restore_char_generator (sax_addr_fax_end),
+        addr_email_string, restore_char_generator (sax_addr_email_end),
+        addr_slots_string, sixtp_dom_parser_new_rooted (sax_addr_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+}
+
 static gboolean
 address_ns (FILE* out)
 {
