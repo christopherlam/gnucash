@@ -74,6 +74,7 @@ static void gnc_plugin_page_invoice_cmd_edit (GSimpleAction *simple, GVariant *p
 static void gnc_plugin_page_invoice_cmd_duplicateInvoice (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_invoice_cmd_post (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_invoice_cmd_unpost (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
+static void gnc_plugin_page_invoice_cmd_delete_invoice (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_invoice_cmd_refresh (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_invoice_cmd_sort_changed (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
 static void gnc_plugin_page_invoice_cmd_enter (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
@@ -109,6 +110,7 @@ static GActionEntry gnc_plugin_page_invoice_actions [] =
     { "EditDuplicateInvoiceAction", gnc_plugin_page_invoice_cmd_duplicateInvoice, NULL, NULL, NULL },
     { "EditPostInvoiceAction", gnc_plugin_page_invoice_cmd_post, NULL, NULL, NULL },
     { "EditUnpostInvoiceAction", gnc_plugin_page_invoice_cmd_unpost, NULL, NULL, NULL },
+    { "EditDeleteInvoiceAction", gnc_plugin_page_invoice_cmd_delete_invoice, NULL, NULL, NULL },
     { "EditTaxOptionsAction", gnc_plugin_page_invoice_cmd_edit_tax, NULL, NULL, NULL },
     { "ViewRefreshAction", gnc_plugin_page_invoice_cmd_refresh, NULL, NULL, NULL },
     { "ViewSaveLayoutAction", gnc_plugin_page_invoice_cmd_save_layout, NULL, NULL, NULL },
@@ -169,6 +171,7 @@ static const gchar *unposted_actions[] =
     "EditPasteAction",
     "EditEditInvoiceAction",
     "EditPostInvoiceAction",
+    "EditDeleteInvoiceAction",
     "RecordEntryAction",
     "CancelEntryAction",
     "DeleteEntryAction",
@@ -192,6 +195,7 @@ static action_toolbar_labels invoice_action_labels[] =
     {"EditDuplicateInvoiceAction", N_("_Duplicate Invoice"), N_("Create a new invoice as a duplicate of the current one")},
     {"EditPostInvoiceAction", N_("_Post Invoice"), N_("Post this invoice to your Chart of Accounts")},
     {"EditUnpostInvoiceAction", N_("_Unpost Invoice"), N_("Unpost this invoice and make it editable")},
+    {"EditDeleteInvoiceAction", N_("_Delete Invoice"), N_("Delete this invoice")},
     {"BusinessNewInvoiceAction", N_("New _Invoice"), N_("Create a new invoice for the same owner as the current one")},
     {"BlankEntryAction", N_("Blank"), N_("Move to the blank entry at the bottom of the invoice")},
     {"ToolsProcessPaymentAction", N_("_Pay Invoice"), N_("Enter a payment for the owner of this invoice") },
@@ -217,6 +221,7 @@ static action_toolbar_labels bill_action_labels[] =
     {"EditDuplicateInvoiceAction", N_("_Duplicate Bill"), N_("Create a new bill as a duplicate of the current one")},
     {"EditPostInvoiceAction", N_("_Post Bill"), N_("Post this bill to your Chart of Accounts")},
     {"EditUnpostInvoiceAction", N_("_Unpost Bill"), N_("Unpost this bill and make it editable")},
+    {"EditDeleteInvoiceAction", N_("_Delete Bill"), N_("Delete this bill")},
     {"BusinessNewInvoiceAction", N_("New _Bill"), N_("Create a new bill for the same owner as the current one")},
     {"BlankEntryAction", N_("Blank"), N_("Move to the blank entry at the bottom of the bill")},
     {"ToolsProcessPaymentAction", N_("_Pay Bill"), N_("Enter a payment for the owner of this bill") },
@@ -242,6 +247,7 @@ static action_toolbar_labels voucher_action_labels[] =
     {"EditDuplicateInvoiceAction", N_("_Duplicate Voucher"), N_("Create a new voucher as a duplicate of the current one")},
     {"EditPostInvoiceAction", N_("_Post Voucher"), N_("Post this voucher to your Chart of Accounts")},
     {"EditUnpostInvoiceAction", N_("_Unpost Voucher"), N_("Unpost this voucher and make it editable")},
+    {"EditDeleteInvoiceAction", N_("_Delete Voucher"), N_("Delete this voucher")},
     {"BusinessNewInvoiceAction", N_("New _Voucher"), N_("Create a new voucher for the same owner as the current one")},
     {"BlankEntryAction", N_("Blank"), N_("Move to the blank entry at the bottom of the voucher")},
     {"ToolsProcessPaymentAction", N_("_Pay Voucher"), N_("Enter a payment for the owner of this voucher") },
@@ -267,6 +273,7 @@ static action_toolbar_labels creditnote_action_labels[] =
     {"EditDuplicateInvoiceAction", N_("_Duplicate Credit Note"), N_("Create a new credit note as a duplicate of the current one")},
     {"EditPostInvoiceAction", N_("_Post Credit Note"), N_("Post this credit note to your Chart of Accounts")},
     {"EditUnpostInvoiceAction", N_("_Unpost Credit Note"), N_("Unpost this credit note and make it editable")},
+    {"EditDeleteInvoiceAction", N_("_Delete Credit Note"), N_("Delete this credit note")},
     {"BusinessNewInvoiceAction", N_("New _Credit Note"), N_("Create a new credit note for the same owner as the current one")},
     {"BlankEntryAction", N_("Blank"), N_("Move to the blank entry at the bottom of the credit note")},
     {"ToolsProcessPaymentAction", N_("_Pay Credit Note"), N_("Enter a payment for the owner of this credit note") },
@@ -1027,6 +1034,24 @@ gnc_plugin_page_invoice_cmd_unpost (GSimpleAction *simple,
     ENTER("(action %p, plugin_page %p)", simple, plugin_page);
     priv = GNC_PLUGIN_PAGE_INVOICE_GET_PRIVATE(plugin_page);
     gnc_invoice_window_unpostCB(NULL, priv->iw);
+    LEAVE(" ");
+}
+
+static void
+gnc_plugin_page_invoice_cmd_delete_invoice (GSimpleAction *simple,
+                                            GVariant *paramter,
+                                            gpointer user_data)
+{
+    auto plugin_page = GNC_PLUGIN_PAGE_INVOICE (user_data);
+    GncPluginPageInvoicePrivate *priv;
+    GtkWindow *parent;
+
+    g_return_if_fail(GNC_IS_PLUGIN_PAGE_INVOICE(plugin_page));
+
+    ENTER("(action %p, plugin_page %p)", simple, plugin_page);
+    priv = GNC_PLUGIN_PAGE_INVOICE_GET_PRIVATE(plugin_page);
+    parent = GTK_WINDOW (gnc_plugin_page_get_window (GNC_PLUGIN_PAGE (plugin_page)));
+    gnc_invoice_window_delete_invoiceCB (parent, priv->iw);
     LEAVE(" ");
 }
 

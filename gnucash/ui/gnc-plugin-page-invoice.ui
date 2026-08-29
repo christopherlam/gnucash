@@ -36,6 +36,12 @@
       <attribute name="tooltip" translatable="yes">Unpost this invoice and make it editable</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
+    <item>
+      <attribute name="label" translatable="no">EditDeleteInvoiceAction</attribute>
+      <attribute name="action">GncPluginPageInvoiceActions.EditDeleteInvoiceAction</attribute>
+      <attribute name="tooltip" translatable="yes">Delete this invoice</attribute>
+      <attribute name="temp" translatable="no">yes</attribute>
+    </item>
   </menu>
 
   <menu id="EditPlaceholder3">

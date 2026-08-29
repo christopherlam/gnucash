@@ -120,9 +120,7 @@ static void gnc_plugin_page_owner_tree_selection_changed_cb (GtkTreeSelection *s
 /* Command callbacks */
 static void gnc_plugin_page_owner_tree_cmd_new_owner (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
 static void gnc_plugin_page_owner_tree_cmd_edit_owner (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
-#if 0 /* Disabled due to crash */
 static void gnc_plugin_page_owner_tree_cmd_delete_owner (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
-#endif
 static void gnc_plugin_page_owner_tree_cmd_view_filter_by (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
 static void gnc_plugin_page_owner_tree_cmd_refresh (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
 static void gnc_plugin_page_owner_tree_cmd_new_invoice (GSimpleAction *simple, GVariant *parameter, gpointer user_data);
@@ -144,9 +142,7 @@ static GActionEntry gnc_plugin_page_owner_tree_actions [] =
     { "OTNewCustomerAction", gnc_plugin_page_owner_tree_cmd_new_owner, NULL, NULL, NULL },
     { "OTNewEmployeeAction", gnc_plugin_page_owner_tree_cmd_new_owner, NULL, NULL, NULL },
 
-#if 0 /* Disabled due to crash */
     { "EditDeleteOwnerAction", gnc_plugin_page_owner_tree_cmd_delete_owner, NULL, NULL, NULL },
-#endif /* Disabled due to crash */
 
     { "ViewFilterByAction", gnc_plugin_page_owner_tree_cmd_view_filter_by, NULL, NULL, NULL },
     { "ViewRefreshAction", gnc_plugin_page_owner_tree_cmd_refresh, NULL, NULL, NULL },
@@ -186,7 +182,7 @@ static const gchar *actions_requiring_owner_rw[] =
     "OTEditCustomerAction",
     "OTEditEmployeeAction",
     "OTProcessPaymentAction",
-/* FIXME disabled due to crash    "EditDeleteOwnerAction", */
+    "EditDeleteOwnerAction",
     NULL
 };
 
@@ -230,7 +226,7 @@ static GncToolBarShortNames toolbar_labels[] =
     { "OTVendorListingReportAction",    N_("Vendor Listing") },
     { "OTCustomerListingReportAction",  N_("Customer Listing") },
     { "OTProcessPaymentAction",         N_("Process Payment") },
-/* FIXME disable due to crash   { "EditDeleteOwnerAction",   N_("Delete") },*/
+    { "EditDeleteOwnerAction",          N_("Delete") },
     { NULL, NULL },
 };
 
@@ -1031,7 +1027,6 @@ gnc_plugin_page_owner_tree_cmd_search_invoices (GSimpleAction *simple,
 }
 
 
-#if 0 /* Disabled due to crash */
 static void
 gnc_plugin_page_owner_tree_cmd_delete_owner (GSimpleAction *simple,
                                              GVariant *parameter,
@@ -1048,9 +1043,10 @@ gnc_plugin_page_owner_tree_cmd_delete_owner (GSimpleAction *simple,
 
     if (NULL == owner) return;
 
-    /* If the owner has objects referring to it, show the list - the owner can't be deleted until these
-       references are dealt with. */
-    list = qof_instance_get_referring_object_list(QOF_INSTANCE(gncOwnerGetUndefined(owner)));
+    /* If the owner has objects referring to it (jobs, invoices/bills, taxtables,
+       billing terms, etc.), show the list - the owner can't be deleted until
+       these references are dealt with. */
+    list = qof_instance_get_referring_object_list (qofOwnerGetOwner (owner));
     if (list != NULL)
     {
 #define EXPLANATION "The list below shows objects which make use of the owner which you want to delete.\nBefore you can delete it, you must either delete those objects or else modify them so they make use\nof another owner"
@@ -1090,19 +1086,17 @@ gnc_plugin_page_owner_tree_cmd_delete_owner (GSimpleAction *simple,
 
         if (GTK_RESPONSE_ACCEPT == response)
         {
-            /* FIXME The code below results in a crash.
-             *       The corresponding menu item/toolbar button is disabled until this is fixed. */
             gnc_set_busy_cursor(NULL, TRUE);
             gnc_suspend_gui_refresh ();
             gncOwnerBeginEdit (owner);
             gncOwnerDestroy (owner);
             gnc_resume_gui_refresh ();
             gnc_unset_busy_cursor(NULL);
+            gnc_plugin_page_owner_tree_selection_changed_cb (NULL, page);
         }
     }
     g_free(owner_name);
 }
-#endif /* Disabled due to crash */
 
 /*********************/
 

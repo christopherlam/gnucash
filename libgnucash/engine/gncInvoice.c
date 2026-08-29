@@ -260,6 +260,21 @@ impl_refers_to_object (const QofInstance* inst, const QofInstance* ref)
     {
         return (inv->posted_lot == GNC_LOT(ref));
     }
+    else if (GNC_IS_CUSTOMER(ref))
+    {
+        return (gncOwnerGetCustomer (&inv->owner) == GNC_CUSTOMER(ref))
+               || (gncOwnerGetCustomer (&inv->billto) == GNC_CUSTOMER(ref));
+    }
+    else if (GNC_IS_VENDOR(ref))
+    {
+        return (gncOwnerGetVendor (&inv->owner) == GNC_VENDOR(ref))
+               || (gncOwnerGetVendor (&inv->billto) == GNC_VENDOR(ref));
+    }
+    else if (GNC_IS_EMPLOYEE(ref))
+    {
+        return (gncOwnerGetEmployee (&inv->owner) == GNC_EMPLOYEE(ref))
+               || (gncOwnerGetEmployee (&inv->billto) == GNC_EMPLOYEE(ref));
+    }
 
     return FALSE;
 }
@@ -274,7 +289,8 @@ static GList*
 impl_get_typed_referring_object_list (const QofInstance* inst, const QofInstance* ref)
 {
     if (!GNC_IS_BILLTERM(ref) && !GNC_IS_JOB(ref) && !GNC_IS_COMMODITY(ref) && !GNC_IS_ACCOUNT(ref)
-            && !GNC_IS_TRANSACTION(ref) && !GNC_IS_LOT(ref))
+            && !GNC_IS_TRANSACTION(ref) && !GNC_IS_LOT(ref) && !GNC_IS_CUSTOMER(ref)
+            && !GNC_IS_VENDOR(ref) && !GNC_IS_EMPLOYEE(ref))
     {
         return NULL;
     }

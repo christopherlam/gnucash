@@ -46,6 +46,7 @@
 #include "window-report.h"
 #include "dialog-search.h"
 #include "search-param.h"
+#include "dialog-object-references.h"
 #include "gnc-session.h"
 #include "gncOwner.h"
 #include "gncInvoice.h"
@@ -1343,6 +1344,59 @@ gnc_invoice_window_unpostCB (GtkWidget *widget, gpointer data)
     gnc_entry_ledger_set_readonly (iw->ledger, FALSE);
     gnc_invoice_update_window (iw, NULL);
     gnc_table_refresh_gui (gnc_entry_ledger_get_table (iw->ledger), FALSE);
+}
+
+void
+gnc_invoice_window_delete_invoiceCB (GtkWindow *parent, gpointer data)
+{
+    InvoiceWindow *iw = data;
+    GncInvoice *invoice;
+    GList *list;
+    gchar *message;
+    gboolean result;
+
+    invoice = iw_get_invoice (iw);
+    if (!invoice)
+        return;
+
+    if (gncInvoiceIsPosted (invoice))
+    {
+        gnc_error_dialog (parent, "%s",
+                          _("This invoice is posted and cannot be deleted."
+                            "  Unpost it first."));
+        return;
+    }
+
+    /* If the invoice is referenced by anything else (e.g. it is still
+     * assigned to a job), refuse the delete and show what's referencing it. */
+    list = qof_instance_get_referring_object_list (QOF_INSTANCE (invoice));
+    if (list != NULL)
+    {
+        gnc_ui_object_references_show
+            (_("The list below shows objects which make use of the invoice "
+               "which you want to delete.\nBefore you can delete it, you "
+               "must either delete those objects or else modify them so "
+               "they no longer use the invoice."), list);
+        g_list_free (list);
+        return;
+    }
+
+    message = g_strdup_printf
+        (_("The invoice %s will be deleted.\nAre you sure you want to do "
+           "this?"), gncInvoiceGetID (invoice));
+    result = gnc_verify_dialog (parent, FALSE, "%s", message);
+    g_free (message);
+    if (!result)
+        return;
+
+    gnc_suspend_gui_refresh ();
+    gncInvoiceRemoveEntries (invoice);
+    gncInvoiceBeginEdit (invoice);
+    gncInvoiceDestroy (invoice);
+    iw->invoice_guid = *guid_null ();
+    gnc_resume_gui_refresh ();
+
+    gnc_close_gui_component (iw->component_id);
 }
 
 void gnc_invoice_window_cut_cb (GtkWidget *widget, gpointer data)
