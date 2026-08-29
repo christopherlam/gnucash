@@ -34,6 +34,10 @@
 #include "sixtp-dom-generators.h"
 #include "io-gncxml-gen.h"
 #include "io-gncxml-v2.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
+#include <gnc-date.h>
+#include <gnc-commodity.h>
 
 /* This static indicates the debugging module that this .o belongs to.  */
 static QofLogModule log_module = GNC_MOD_IO;
@@ -83,134 +87,168 @@ static QofLogModule log_module = GNC_MOD_IO;
 
 */
 
-static gboolean
-price_parse_xml_sub_node (GNCPrice* p, xmlNodePtr sub_node, QofBook* book)
-{
-    if (!p || !sub_node) return FALSE;
+/* SAX-direct (streaming) price parser: reads a <price> straight off the
+ * SAX character stream, with no intermediate xmlNodePtr built for any
+ * of its fields. */
 
-    gnc_price_begin_edit (p);
-    if (g_strcmp0 ("price:id", (char*)sub_node->name) == 0)
+struct price_sax_pdata
+{
+    GNCPrice* price;
+    QofBook* book;
+};
+
+static gboolean
+sax_price_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        auto c = dom_tree_to_guid (sub_node);
-        if (!c) return FALSE;
-        gnc_price_set_guid (p, &*c);
-    }
-    else if (g_strcmp0 ("price:commodity", (char*)sub_node->name) == 0)
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        gnc_price_set_guid (pdata->price, &guid);
+        return TRUE;
+    });
+}
+
+/* Unlike trn:currency/act:commodity, an unresolvable commodity/currency
+   ref fails the whole price rather than being left NULL. */
+static gboolean
+sax_price_commodity_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
+    for (GSList* lp = dfc; lp; lp = lp->next)
     {
-        gnc_commodity* c = dom_tree_to_commodity_ref (sub_node, book);
-        if (!c) return FALSE;
-        gnc_price_set_commodity (p, c);
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
     }
-    else if (g_strcmp0 ("price:currency", (char*)sub_node->name) == 0)
-    {
-        gnc_commodity* c = dom_tree_to_commodity_ref (sub_node, book);
-        if (!c) return FALSE;
-        gnc_price_set_currency (p, c);
-    }
-    else if (g_strcmp0 ("price:time", (char*)sub_node->name) == 0)
-    {
-        time64 time = dom_tree_to_time64 (sub_node);
-        if (!dom_tree_valid_time64 (time, sub_node->name)) time = 0;
-        gnc_price_set_time64 (p, time);
-    }
-    else if (g_strcmp0 ("price:source", (char*)sub_node->name) == 0)
-    {
-        if (!apply_xmlnode_text (gnc_price_set_source_string, p, sub_node))
-            return FALSE;
-    }
-    else if (g_strcmp0 ("price:type", (char*)sub_node->name) == 0)
-    {
-        if (!apply_xmlnode_text (gnc_price_set_typestr, p, sub_node))
-            return FALSE;
-    }
-    else if (g_strcmp0 ("price:value", (char*)sub_node->name) == 0)
-    {
-        gnc_price_set_value (p, dom_tree_to_gnc_numeric (sub_node));
-    }
-    gnc_price_commit_edit (p);
+    if (!space || !id) return FALSE;
+    g_strstrip (space);
+    g_strstrip (id);
+    auto* table = gnc_commodity_table_get_table (pdata->book);
+    if (!table) return FALSE;
+    gnc_commodity* ref = gnc_commodity_table_lookup (table, space, id);
+    if (!ref) return FALSE;
+    gnc_price_set_commodity (pdata->price, ref);
     return TRUE;
 }
 
 static gboolean
-price_parse_xml_end_handler (gpointer data_for_children,
-                             GSList* data_from_children,
-                             GSList* sibling_data,
-                             gpointer parent_data,
-                             gpointer global_data,
-                             gpointer* result,
-                             const gchar* tag)
+sax_price_currency_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
 {
-    gboolean ok = TRUE;
-    xmlNodePtr price_xml = (xmlNodePtr) data_for_children;
-    xmlNodePtr child;
-    GNCPrice* p = NULL;
-    gxpf_data* gdata = static_cast<decltype (gdata)> (global_data);
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
+    for (GSList* lp = dfc; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
+    }
+    if (!space || !id) return FALSE;
+    g_strstrip (space);
+    g_strstrip (id);
+    auto* table = gnc_commodity_table_get_table (pdata->book);
+    if (!table) return FALSE;
+    gnc_commodity* ref = gnc_commodity_table_lookup (table, space, id);
+    if (!ref) return FALSE;
+    gnc_price_set_currency (pdata->price, ref);
+    return TRUE;
+}
 
-    /* we haven't been handed the *top* level node yet... */
-    if (parent_data) return TRUE;
+static gboolean
+sax_price_time_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST "price:time")) t = 0;
+        gnc_price_set_time64 (pdata->price, t);
+        return TRUE;
+    });
+}
 
-    *result = NULL;
+static gboolean
+sax_price_source_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gnc_price_set_source_string (pdata->price, txt); return TRUE; });
+}
 
-    if (!price_xml) return FALSE;
-    if (price_xml->next)
-    {
-        ok = FALSE;
-        goto cleanup_and_exit;
-    }
-    if (price_xml->prev)
-    {
-        ok = FALSE;
-        goto cleanup_and_exit;
-    }
-    if (!price_xml->xmlChildrenNode)
-    {
-        ok = FALSE;
-        goto cleanup_and_exit;
-    }
+static gboolean
+sax_price_type_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gnc_price_set_typestr (pdata->price, txt); return TRUE; });
+}
 
-    p = gnc_price_create (book);
-    if (!p)
+static gboolean
+sax_price_value_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        ok = FALSE;
-        goto cleanup_and_exit;
-    }
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gnc_price_set_value (pdata->price, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
 
-    for (child = price_xml->xmlChildrenNode; child; child = child->next)
+static gboolean
+sax_price_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                 gpointer*, const gchar* tag, gchar**)
+{
+    if (!tag)
     {
-        switch (child->type)
-        {
-        case XML_COMMENT_NODE:
-        case XML_TEXT_NODE:
-            break;
-        case XML_ELEMENT_NODE:
-            if (!price_parse_xml_sub_node (p, child, book))
-            {
-                ok = FALSE;
-                goto cleanup_and_exit;
-            }
-            break;
-        default:
-            PERR ("Unknown node type (%d) while parsing gnc-price xml.", child->type);
-            child = NULL;
-            ok = FALSE;
-            goto cleanup_and_exit;
-            break;
-        }
+        *data_for_children = nullptr;
+        return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (price_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->price = gnc_price_create (pdata->book);
+    gnc_price_begin_edit (pdata->price);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-cleanup_and_exit:
-    if (ok)
-    {
-        *result = p;
-    }
-    else
-    {
-        *result = NULL;
-        gnc_price_unref (p);
-    }
-    xmlFreeNode (price_xml);
-    return ok;
+static gboolean
+sax_price_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+              gpointer* result, const gchar* tag)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (data_for_children);
+    if (!tag)
+        return TRUE;
+    gnc_price_commit_edit (pdata->price);
+    *result = pdata->price;
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_price_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<price_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gnc_price_unref (pdata->price);
+    g_free (pdata);
 }
 
 static void
@@ -222,9 +260,32 @@ cleanup_gnc_price (sixtp_child_result* result)
 static sixtp*
 gnc_price_parser_new (void)
 {
-    return sixtp_dom_parser_new (price_parse_xml_end_handler,
-                                 cleanup_gnc_price,
-                                 cleanup_gnc_price);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_price_start,
+        SIXTP_END_HANDLER_ID, sax_price_end,
+        SIXTP_FAIL_HANDLER_ID, sax_price_fail,
+        SIXTP_CLEANUP_RESULT_ID, cleanup_gnc_price,
+        SIXTP_RESULT_FAIL_ID, cleanup_gnc_price,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        "price:id", restore_char_generator (sax_price_id_end),
+        "price:source", restore_char_generator (sax_price_source_end),
+        "price:type", restore_char_generator (sax_price_type_end),
+        "price:value", restore_char_generator (sax_price_value_end),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, "price:commodity",
+                          sax_commodity_ref_parser_new (sax_price_commodity_end));
+    sixtp_add_sub_parser (p, "price:currency",
+                          sax_commodity_ref_parser_new (sax_price_currency_end));
+    sixtp_add_sub_parser (p, "price:time", sax_time64_parser_new (sax_price_time_ts_end));
+
+    return p;
 }
 
 
