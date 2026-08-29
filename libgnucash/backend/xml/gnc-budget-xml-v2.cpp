@@ -37,6 +37,7 @@
 #include "gnc-xml.h"
 #include "io-gncxml-gen.h"
 #include "io-gncxml-v2.h"
+#include <guid.hpp>
 
 static QofLogModule log_module = GNC_MOD_IO;
 
@@ -151,43 +152,6 @@ static struct dom_tree_handler budget_handlers[] =
     { NULL, 0, 0, 0 }
 };
 
-static gboolean
-gnc_budget_end_handler (gpointer data_for_children,
-                        GSList* data_from_children, GSList* sibling_data,
-                        gpointer parent_data, gpointer global_data,
-                        gpointer* result, const gchar* tag)
-{
-    GncBudget* bgt;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
-    if (!tag)
-    {
-        return TRUE;
-    }
-
-    g_return_val_if_fail (tree, FALSE);
-
-    bgt = dom_tree_to_budget (tree, book);
-    xmlFreeNode (tree);
-    if (bgt != NULL)
-    {
-        /* ends up calling book_callback */
-        gdata->cb (tag, gdata->parsedata, bgt);
-    }
-
-    return bgt != NULL;
-}
-
-
 GncBudget*
 dom_tree_to_budget (xmlNodePtr node, QofBook* book)
 {
@@ -203,9 +167,179 @@ dom_tree_to_budget (xmlNodePtr node, QofBook* book)
     return bgt;
 }
 
+/***********************************************************************/
+/* SAX-direct (streaming) budget parser: reads a gnc:budget straight off
+ * the SAX character stream, with no intermediate xmlNodePtr built for
+ * its scalar fields (id, name, description, num-periods). bgt:recurrence
+ * and bgt:slots stay on the (low-volume -- one per budget) DOM path via
+ * dom_tree_to_recurrence()/dom_tree_create_instance_slots().
+ */
+
+struct budget_sax_pdata
+{
+    GncBudget* bgt;
+    QofBook* book;
+};
+
+static gboolean
+sax_bgt_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        qof_instance_set_guid (QOF_INSTANCE (pdata->bgt), &guid);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_bgt_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gnc_budget_set_name (pdata->bgt, txt); return TRUE; });
+}
+
+static gboolean
+sax_bgt_description_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gnc_budget_set_description (pdata->bgt, txt); return TRUE; });
+}
+
+static gboolean
+sax_bgt_num_periods_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        guint num_periods;
+        if (!string_to_guint (txt, &num_periods)) return FALSE;
+        gnc_budget_set_num_periods (pdata->bgt, num_periods);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_bgt_recurrence_dom_end (gpointer data_for_children, GSList*, GSList*,
+                            gpointer parent_data, gpointer, gpointer* result,
+                            const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        Recurrence* r = dom_tree_to_recurrence (tree);
+        if (r)
+        {
+            gnc_budget_set_recurrence (pdata->bgt, r);
+            g_free (r);
+        }
+        else
+            ok = FALSE;
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+static gboolean
+sax_bgt_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                       gpointer parent_data, gpointer, gpointer* result,
+                       const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->bgt));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+static gboolean
+sax_bgt_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+              gpointer*, const gchar* tag, gchar**)
+{
+    if (!tag)
+    {
+        *data_for_children = nullptr;
+        return TRUE;
+    }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (budget_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->bgt = gnc_budget_new (pdata->book);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_bgt_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+            gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+
+    if (!tag)
+        return TRUE;
+
+    GncBudget* bgt = pdata->bgt;
+    g_free (pdata);
+
+    /* ends up calling book_callback, which does nothing for gnc:budget:
+       gnc_budget_new() already registered it with the book. */
+    gdata->cb (tag, gdata->parsedata, bgt);
+    return TRUE;
+}
+
+static void
+sax_bgt_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+             gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<budget_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gnc_budget_destroy (pdata->bgt);
+    g_free (pdata);
+}
+
 sixtp*
 gnc_budget_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_budget_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_bgt_start,
+        SIXTP_END_HANDLER_ID, sax_bgt_end,
+        SIXTP_FAIL_HANDLER_ID, sax_bgt_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        bgt_id_string, restore_char_generator (sax_bgt_id_end),
+        bgt_name_string, restore_char_generator (sax_bgt_name_end),
+        bgt_description_string, restore_char_generator (sax_bgt_description_end),
+        bgt_num_periods_string, restore_char_generator (sax_bgt_num_periods_end),
+        bgt_recurrence_string, sixtp_dom_parser_new_rooted (sax_bgt_recurrence_dom_end, NULL, NULL),
+        bgt_slots_string, sixtp_dom_parser_new_rooted (sax_bgt_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    /* Self-reference under our own tag: see the equivalent comment in
+       gnc_transaction_sixtp_parser_create() in gnc-transaction-xml-v2.cpp. */
+    sixtp_add_sub_parser (p, gnc_budget_string, p);
+
+    return p;
 }
 /* ======================  END OF FILE ===================*/
