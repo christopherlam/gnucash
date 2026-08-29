@@ -28,6 +28,8 @@
 #include <string.h>
 #include "gncEntry.h"
 #include "gncTaxTableP.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -135,301 +137,338 @@ taxtable_dom_tree_create (GncTaxTable* table)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) tax-table parser: reads a gnc:GncTaxTable and
+ * its gnc:GncTaxTableEntry children straight off the SAX character
+ * stream, with no intermediate xmlNodePtr built for any of their
+ * fields. Nothing else in the codebase uses the old DOM-based parser
+ * this replaces, so it's gone entirely rather than kept for reuse.
+ */
 
-struct ttentry_pdata
+struct taxtable_sax_pdata
+{
+    GncTaxTable* table;
+    QofBook* book;
+};
+
+struct ttentry_sax_pdata
 {
     GncTaxTableEntry* ttentry;
     QofBook* book;
 };
 
 static gboolean
-ttentry_acct_handler (xmlNodePtr node, gpointer ttentry_pdata)
+sax_ttentry_acct_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
 {
-    struct ttentry_pdata* pdata = static_cast<decltype (pdata)> (ttentry_pdata);
-    Account* acc;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    acc = xaccAccountLookup (&*guid, pdata->book);
-    g_return_val_if_fail (acc, FALSE);
-
-    gncTaxTableEntrySetAccount (pdata->ttentry, acc);
-    return TRUE;
+    auto* pdata = static_cast<ttentry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        Account* acc = xaccAccountLookup (&guid, pdata->book);
+        if (!acc) return FALSE;
+        gncTaxTableEntrySetAccount (pdata->ttentry, acc);
+        return TRUE;
+    });
 }
 
 static gboolean
-ttentry_type_handler (xmlNodePtr node, gpointer ttentry_pdata)
+sax_ttentry_type_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
 {
-    struct ttentry_pdata* pdata = static_cast<decltype (pdata)> (ttentry_pdata);
-    auto tte_settype = [](GncTaxTableEntry* tt, const char *str)
+    auto* pdata = static_cast<ttentry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
         GncAmountType type;
-        if (gncAmountStringToType (str, &type))
-            gncTaxTableEntrySetType (tt, type);
-    };
-    return apply_xmlnode_text (tte_settype, pdata->ttentry, node);
+        if (gncAmountStringToType (txt, &type))
+            gncTaxTableEntrySetType (pdata->ttentry, type);
+        return TRUE;
+    });
 }
 
 static gboolean
-ttentry_amount_handler (xmlNodePtr node, gpointer ttentry_pdata)
+sax_ttentry_amount_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
 {
-    struct ttentry_pdata* pdata = static_cast<decltype (pdata)> (ttentry_pdata);
+    auto* pdata = static_cast<ttentry_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncTaxTableEntrySetAmount (pdata->ttentry, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
 
-    gncTaxTableEntrySetAmount (pdata->ttentry, dom_tree_to_gnc_numeric (node));
+static gboolean
+sax_ttentry_start (GSList*, gpointer parent_data, gpointer, gpointer* data_for_children,
+                   gpointer*, const gchar*, gchar**)
+{
+    auto* taxtable_pdata = static_cast<struct taxtable_sax_pdata*> (parent_data);
+    auto* pdata = g_new (ttentry_sax_pdata, 1);
+    pdata->book = taxtable_pdata->book;
+    pdata->ttentry = gncTaxTableEntryCreate ();
+    *data_for_children = pdata;
     return TRUE;
 }
 
-static struct dom_tree_handler ttentry_handlers_v2[] =
+static gboolean
+sax_ttentry_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                 gpointer* result, const gchar*)
 {
-    { ttentry_account_string, ttentry_acct_handler, 0, 0 },
-    { ttentry_type_string, ttentry_type_handler, 1, 0 },
-    { ttentry_amount_string, ttentry_amount_handler, 1, 0 },
-    { NULL, 0, 0, 0 }
-};
+    auto* pdata = static_cast<ttentry_sax_pdata*> (data_for_children);
+    *result = pdata->ttentry;
+    g_free (pdata);
+    return TRUE;
+}
 
-static GncTaxTableEntry*
-dom_tree_to_ttentry (xmlNodePtr node, QofBook* book)
+static void
+sax_ttentry_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                  gpointer*, const gchar*)
 {
-    struct ttentry_pdata ttentry_pdata;
-    gboolean successful;
+    auto* pdata = static_cast<ttentry_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncTaxTableEntryDestroy (pdata->ttentry);
+    g_free (pdata);
+}
 
-    ttentry_pdata.ttentry = gncTaxTableEntryCreate ();
-    ttentry_pdata.book = book;
+static sixtp*
+sax_ttentry_parser_new (void)
+{
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_ttentry_start,
+        SIXTP_END_HANDLER_ID, sax_ttentry_end,
+        SIXTP_FAIL_HANDLER_ID, sax_ttentry_fail,
+        SIXTP_NO_MORE_HANDLERS);
 
-    successful = dom_tree_generic_parse (node, ttentry_handlers_v2,
-                                         &ttentry_pdata);
-
-    if (!successful)
-    {
-        PERR ("failed to parse tax table entry tree");
-        gncTaxTableEntryDestroy (ttentry_pdata.ttentry);
-        ttentry_pdata.ttentry = NULL;
-    }
-
-    return ttentry_pdata.ttentry;
+    return sixtp_add_some_sub_parsers (
+        p, TRUE,
+        ttentry_account_string, restore_char_generator (sax_ttentry_acct_end),
+        ttentry_type_string, restore_char_generator (sax_ttentry_type_end),
+        ttentry_amount_string, restore_char_generator (sax_ttentry_amount_end),
+        NULL, NULL);
 }
 
 /***********************************************************************/
 
-struct taxtable_pdata
-{
-    GncTaxTable* table;
-    QofBook* book;
-};
-
 static gboolean
-set_parent_child (xmlNodePtr node, struct taxtable_pdata* pdata,
-                  void (*func) (GncTaxTable*, GncTaxTable*))
+sax_taxtable_parent_child (GncTaxTable* table, QofBook* book, const char* txt,
+                           void (*func) (GncTaxTable*, GncTaxTable*))
 {
-    GncTaxTable* table;
+    GncGUID guid;
+    if (!string_to_guid (txt, &guid)) return FALSE;
 
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    table = gncTaxTableLookup (pdata->book, &*guid);
+    GncTaxTable* other = gncTaxTableLookup (book, &guid);
 
-    /* Ignore pointers to self */
-    if (table == pdata->table)
-    {
-        PINFO ("found a self-referential parent/child; ignoring.\n");
+    /* Ignore pointers to self. */
+    if (other == table)
         return TRUE;
-    }
 
-    if (!table)
+    if (!other)
     {
-        table = gncTaxTableCreate (pdata->book);
-        gncTaxTableBeginEdit (table);
-        gncTaxTableSetGUID (table, &*guid);
-        gncTaxTableCommitEdit (table);
+        other = gncTaxTableCreate (book);
+        gncTaxTableBeginEdit (other);
+        gncTaxTableSetGUID (other, &guid);
+        gncTaxTableCommitEdit (other);
     }
-    g_return_val_if_fail (table, FALSE);
-    func (pdata->table, table);
-
+    func (table, other);
     return TRUE;
 }
 
 static gboolean
-taxtable_guid_handler (xmlNodePtr node, gpointer taxtable_pdata)
+sax_taxtable_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
 {
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    GncTaxTable* table;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    table = gncTaxTableLookup (pdata->book, &*guid);
-    if (table)
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncTaxTableDestroy (pdata->table);
-        pdata->table = table;
-        gncTaxTableBeginEdit (table);
-    }
-    else
-    {
-        gncTaxTableSetGUID (pdata->table, &*guid);
-    }
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    return TRUE;
-}
-
-static gboolean
-taxtable_name_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    return apply_xmlnode_text (gncTaxTableSetName, pdata->table, node);
-}
-
-static gboolean
-taxtable_refcount_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    gint64 val;
-
-    dom_tree_to_integer (node, &val);
-    gncTaxTableSetRefcount (pdata->table, val);
-    return TRUE;
-}
-
-static gboolean
-taxtable_invisible_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    gint64 val;
-
-    dom_tree_to_integer (node, &val);
-    if (val)
-        gncTaxTableMakeInvisible (pdata->table);
-    return TRUE;
-}
-
-static gboolean
-taxtable_parent_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    return set_parent_child (node, pdata, gncTaxTableSetParent);
-}
-
-static gboolean
-taxtable_child_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    return set_parent_child (node, pdata, gncTaxTableSetChild);
-}
-
-static gboolean
-taxtable_entries_handler (xmlNodePtr node, gpointer taxtable_pdata)
-{
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-    xmlNodePtr mark;
-
-    g_return_val_if_fail (node, FALSE);
-    g_return_val_if_fail (node->xmlChildrenNode, FALSE);
-
-    for (mark = node->xmlChildrenNode; mark; mark = mark->next)
-    {
-        GncTaxTableEntry* entry;
-
-        if (g_strcmp0 ("text", (char*)mark->name) == 0)
-            continue;
-
-        if (g_strcmp0 (gnc_taxtableentry_string, (char*)mark->name))
-            return FALSE;
-
-        entry = dom_tree_to_ttentry (mark, pdata->book);
-
-        if (entry)
-            gncTaxTableAddEntry (pdata->table, entry);
+        /* Adopt a table that already exists by this guid -- e.g. a
+           placeholder created earlier by another table's parent/child
+           ref -- instead of the fresh one sax_taxtable_start() made. */
+        GncTaxTable* table = gncTaxTableLookup (pdata->book, &guid);
+        if (table)
+        {
+            gncTaxTableDestroy (pdata->table);
+            pdata->table = table;
+            gncTaxTableBeginEdit (table);
+        }
         else
-            return FALSE;
+            gncTaxTableSetGUID (pdata->table, &guid);
+        return TRUE;
+    });
+}
 
+static gboolean
+sax_taxtable_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncTaxTableSetName (pdata->table, txt); return TRUE; });
+}
+
+static gboolean
+sax_taxtable_refcount_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncTaxTableSetRefcount (pdata->table, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_taxtable_invisible_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        if (val)
+            gncTaxTableMakeInvisible (pdata->table);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_taxtable_parent_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { return sax_taxtable_parent_child (pdata->table, pdata->book, txt, gncTaxTableSetParent); });
+}
+
+static gboolean
+sax_taxtable_child_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { return sax_taxtable_parent_child (pdata->table, pdata->book, txt, gncTaxTableSetChild); });
+}
+
+static gboolean
+sax_taxtable_entries_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                          gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    GSList* ordered = g_slist_reverse (g_slist_copy (dfc));
+    for (GSList* lp = ordered; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        gncTaxTableAddEntry (pdata->table, static_cast<GncTaxTableEntry*> (cr->data));
     }
+    g_slist_free (ordered);
     return TRUE;
 }
 
 static gboolean
-taxtable_slots_handler (xmlNodePtr node, gpointer taxtable_pdata)
+sax_taxtable_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                            gpointer parent_data, gpointer, gpointer* result,
+                            const gchar*)
 {
-    struct taxtable_pdata* pdata = static_cast<decltype (pdata)> (taxtable_pdata);
-
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->table));
-}
-
-static struct dom_tree_handler taxtable_handlers_v2[] =
-{
-    { taxtable_guid_string, taxtable_guid_handler, 1, 0 },
-    { taxtable_name_string, taxtable_name_handler, 1, 0 },
-    { taxtable_refcount_string, taxtable_refcount_handler, 1, 0 },
-    { taxtable_invisible_string, taxtable_invisible_handler, 1, 0 },
-    { taxtable_parent_string, taxtable_parent_handler, 0, 0 },
-    { taxtable_child_string, taxtable_child_handler, 0, 0 },
-    { taxtable_entries_string, taxtable_entries_handler, 1, 0 },
-    { taxtable_slots_string, taxtable_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncTaxTable*
-dom_tree_to_taxtable (xmlNodePtr node, QofBook* book)
-{
-    struct taxtable_pdata taxtable_pdata;
-    gboolean successful;
-
-    taxtable_pdata.table = gncTaxTableCreate (book);
-    taxtable_pdata.book = book;
-    gncTaxTableBeginEdit (taxtable_pdata.table);
-
-    successful = dom_tree_generic_parse (node, taxtable_handlers_v2,
-                                         &taxtable_pdata);
-
-    if (successful)
-        gncTaxTableCommitEdit (taxtable_pdata.table);
-    else
+    auto* pdata = static_cast<taxtable_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
     {
-        PERR ("failed to parse tax table tree");
-        gncTaxTableDestroy (taxtable_pdata.table);
-        taxtable_pdata.table = NULL;
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->table));
+        xmlFreeNode (tree);
     }
-
-    return taxtable_pdata.table;
+    *result = nullptr;
+    return ok;
 }
 
 static gboolean
-gnc_taxtable_end_handler (gpointer data_for_children,
-                          GSList* data_from_children, GSList* sibling_data,
-                          gpointer parent_data, gpointer global_data,
-                          gpointer* result, const gchar* tag)
+sax_taxtable_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                    gpointer*, const gchar* tag, gchar**)
 {
-    GncTaxTable* table;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (taxtable_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->table = gncTaxTableCreate (pdata->book);
+    gncTaxTableBeginEdit (pdata->table);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_taxtable_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+                  gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
 
-    table = dom_tree_to_taxtable (tree, book);
-    if (table != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, table);
-    }
+    if (!tag)
+        return TRUE;
 
-    xmlFreeNode (tree);
+    GncTaxTable* table = pdata->table;
+    g_free (pdata);
 
-    return table != NULL;
+    gncTaxTableCommitEdit (table);
+    gdata->cb (tag, gdata->parsedata, table);
+    return TRUE;
+}
+
+static void
+sax_taxtable_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                   gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<taxtable_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncTaxTableDestroy (pdata->table);
+    g_free (pdata);
 }
 
 static sixtp*
 taxtable_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_taxtable_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_taxtable_start,
+        SIXTP_END_HANDLER_ID, sax_taxtable_end,
+        SIXTP_FAIL_HANDLER_ID, sax_taxtable_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        taxtable_guid_string, restore_char_generator (sax_taxtable_guid_end),
+        taxtable_name_string, restore_char_generator (sax_taxtable_name_end),
+        taxtable_refcount_string, restore_char_generator (sax_taxtable_refcount_end),
+        taxtable_invisible_string, restore_char_generator (sax_taxtable_invisible_end),
+        taxtable_parent_string, restore_char_generator (sax_taxtable_parent_end),
+        taxtable_child_string, restore_char_generator (sax_taxtable_child_end),
+        taxtable_slots_string, sixtp_dom_parser_new_rooted (sax_taxtable_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    {
+        sixtp* entries = sixtp_set_any (
+            sixtp_new (), FALSE,
+            SIXTP_START_HANDLER_ID, sax_passthrough_start,
+            SIXTP_END_HANDLER_ID, sax_taxtable_entries_end,
+            SIXTP_NO_MORE_HANDLERS);
+        sixtp_add_sub_parser (entries, gnc_taxtableentry_string, sax_ttentry_parser_new ());
+        sixtp_add_sub_parser (p, taxtable_entries_string, entries);
+    }
+
+    return p;
 }
 
 static void
