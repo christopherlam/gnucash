@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gncEmployeeP.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
 #include "sixtp-utils.h"
@@ -43,8 +45,6 @@
 #include "gnc-address-xml-v2.h"
 
 #define _GNC_MOD_NAME   GNC_ID_EMPLOYEE
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* employee_version_string = "2.0.0";
 
@@ -122,231 +122,267 @@ employee_dom_tree_create (GncEmployee* employee)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) employee parser: reads a gnc:GncEmployee
+   straight off the SAX character stream, with no intermediate
+   xmlNodePtr built for any of its fields. Nothing else in the
+   codebase uses the old DOM-based parser this replaces, so it's gone
+   entirely. */
 
-struct employee_pdata
+struct employee_sax_pdata
 {
     GncEmployee* employee;
     QofBook* book;
 };
 
 static gboolean
-employee_username_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    return apply_xmlnode_text (gncEmployeeSetUsername, pdata->employee, node);
-}
-
-static gboolean
-employee_guid_handler (xmlNodePtr node, gpointer employee_pdata)
-{
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-    GncEmployee* employee;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-
-    /* See if we've already created this one */
-    employee = gncEmployeeLookup (pdata->book, &*guid);
-    if (employee)
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncEmployeeDestroy (pdata->employee);
-        pdata->employee = employee;
-        gncEmployeeBeginEdit (employee);
-    }
-    else
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        /* Adopt an employee that already exists by this guid instead
+           of the fresh one sax_employee_start() made. */
+        GncEmployee* employee = gncEmployeeLookup (pdata->book, &guid);
+        if (employee)
+        {
+            gncEmployeeDestroy (pdata->employee);
+            pdata->employee = employee;
+            gncEmployeeBeginEdit (employee);
+        }
+        else
+            gncEmployeeSetGUID (pdata->employee, &guid);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_employee_username_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEmployeeSetUsername (pdata->employee, txt); return TRUE; });
+}
+
+static gboolean
+sax_employee_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEmployeeSetID (pdata->employee, txt); return TRUE; });
+}
+
+static gboolean
+sax_employee_language_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEmployeeSetLanguage (pdata->employee, txt); return TRUE; });
+}
+
+static gboolean
+sax_employee_acl_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncEmployeeSetAcl (pdata->employee, txt); return TRUE; });
+}
+
+static gboolean
+sax_employee_active_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        gncEmployeeSetGUID (pdata->employee, &*guid);
-    }
-
-    return TRUE;
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncEmployeeSetActive (pdata->employee, (gboolean) val);
+        return TRUE;
+    });
 }
 
 static gboolean
-employee_id_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_workday_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                          gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    return apply_xmlnode_text (gncEmployeeSetID, pdata->employee, node);
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncEmployeeSetWorkday (pdata->employee, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
 }
 
 static gboolean
-employee_language_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_rate_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    return apply_xmlnode_text (gncEmployeeSetLanguage, pdata->employee, node);
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncEmployeeSetRate (pdata->employee, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
 }
 
 static gboolean
-employee_acl_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_ccard_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    return apply_xmlnode_text (gncEmployeeSetAcl, pdata->employee, node);
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        Account* ccard_acc = xaccAccountLookup (&guid, pdata->book);
+        g_return_val_if_fail (ccard_acc, FALSE);
+        gncEmployeeSetCCard (pdata->employee, ccard_acc);
+        return TRUE;
+    });
 }
 
 static gboolean
-employee_addr_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                            gpointer parent_data, gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    return gnc_dom_tree_to_address (node, gncEmployeeGetAddr (pdata->employee));
-}
-
-static gboolean
-employee_active_handler (xmlNodePtr node, gpointer employee_pdata)
-{
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-    gint64 val;
-    gboolean ret;
-
-    ret = dom_tree_to_integer (node, &val);
-    if (ret)
-        gncEmployeeSetActive (pdata->employee, (gboolean)val);
-
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->employee));
+    xmlFreeNode (tree);
     return ret;
 }
 
 static gboolean
-employee_workday_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_addr_start (GSList*, gpointer parent_data, gpointer,
+                         gpointer* data_for_children, gpointer*, const gchar*, gchar**)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-
-    gncEmployeeSetWorkday (pdata->employee, dom_tree_to_gnc_numeric (node));
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    *data_for_children = gncEmployeeGetAddr (pdata->employee);
     return TRUE;
 }
 
 static gboolean
-employee_rate_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_currency_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
+    auto* pdata = static_cast<employee_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
 
-    gncEmployeeSetRate (pdata->employee, dom_tree_to_gnc_numeric (node));
-    return TRUE;
-}
+    for (GSList* lp = dfc; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
+    }
 
-static gboolean
-employee_currency_handler (xmlNodePtr node, gpointer employee_pdata)
-{
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-    gnc_commodity* com;
-
-    com = dom_tree_to_commodity_ref (node, pdata->book);
+    gnc_commodity* com = nullptr;
+    if (space && id)
+    {
+        g_strstrip (space);
+        g_strstrip (id);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        if (table)
+            com = gnc_commodity_table_lookup (table, space, id);
+    }
     g_return_val_if_fail (com, FALSE);
-
     gncEmployeeSetCurrency (pdata->employee, com);
-
     return TRUE;
 }
 
 static gboolean
-employee_ccard_handler (xmlNodePtr node, gpointer employee_pdata)
+sax_employee_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                    gpointer*, const gchar* tag, gchar**)
 {
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-    Account* ccard_acc;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-
-    ccard_acc = xaccAccountLookup (&*guid, pdata->book);
-
-    g_return_val_if_fail (ccard_acc, FALSE);
-    gncEmployeeSetCCard (pdata->employee, ccard_acc);
-
-    return TRUE;
-}
-
-static gboolean
-employee_slots_handler (xmlNodePtr node, gpointer employee_pdata)
-{
-    struct employee_pdata* pdata = static_cast<decltype (pdata)> (employee_pdata);
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->employee));
-}
-
-static struct dom_tree_handler employee_handlers_v2[] =
-{
-    { employee_username_string, employee_username_handler, 1, 0 },
-    { employee_guid_string, employee_guid_handler, 1, 0 },
-    { employee_id_string, employee_id_handler, 1, 0 },
-    { employee_addr_string, employee_addr_handler, 1, 0 },
-    { employee_language_string, employee_language_handler, 0, 0 },
-    { employee_acl_string, employee_acl_handler, 0, 0 },
-    { employee_active_string, employee_active_handler, 1, 0 },
-    { employee_workday_string, employee_workday_handler, 1, 0 },
-    { employee_rate_string, employee_rate_handler, 1, 0 },
-    { employee_currency_string, employee_currency_handler, 0, 0 }, /* XXX */
-    { "employee:commodity", employee_currency_handler, 0, 0 }, /* XXX */
-    { employee_ccard_string, employee_ccard_handler, 0, 0 },
-    { employee_slots_string, employee_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncEmployee*
-dom_tree_to_employee (xmlNodePtr node, QofBook* book)
-{
-    struct employee_pdata employee_pdata;
-    gboolean successful;
-
-    employee_pdata.employee = gncEmployeeCreate (book);
-    employee_pdata.book = book;
-    gncEmployeeBeginEdit (employee_pdata.employee);
-
-    successful = dom_tree_generic_parse (node, employee_handlers_v2,
-                                         &employee_pdata);
-    if (successful)
-        gncEmployeeCommitEdit (employee_pdata.employee);
-    else
-    {
-        PERR ("failed to parse employee tree");
-        gncEmployeeDestroy (employee_pdata.employee);
-        employee_pdata.employee = NULL;
-    }
-
-    return employee_pdata.employee;
-}
-
-static gboolean
-gnc_employee_end_handler (gpointer data_for_children,
-                          GSList* data_from_children, GSList* sibling_data,
-                          gpointer parent_data, gpointer global_data,
-                          gpointer* result, const gchar* tag)
-{
-    GncEmployee* employee;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new (employee_sax_pdata, 1);
+    pdata->employee = gncEmployeeCreate (book);
+    pdata->book = book;
+    gncEmployeeBeginEdit (pdata->employee);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_employee_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+                  gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    employee = dom_tree_to_employee (tree, book);
-    if (employee != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, employee);
-    }
+    GncEmployee* employee = pdata->employee;
+    g_free (pdata);
 
-    xmlFreeNode (tree);
+    gncEmployeeCommitEdit (employee);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, employee);
+    return TRUE;
+}
 
-    return employee != NULL;
+static void
+sax_employee_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                   gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<employee_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncEmployeeDestroy (pdata->employee);
+    g_free (pdata);
 }
 
 static sixtp*
 employee_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_employee_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_employee_start,
+        SIXTP_END_HANDLER_ID, sax_employee_end,
+        SIXTP_FAIL_HANDLER_ID, sax_employee_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        employee_guid_string, restore_char_generator (sax_employee_guid_end),
+        employee_username_string, restore_char_generator (sax_employee_username_end),
+        employee_id_string, restore_char_generator (sax_employee_id_end),
+        employee_language_string, restore_char_generator (sax_employee_language_end),
+        employee_acl_string, restore_char_generator (sax_employee_acl_end),
+        employee_active_string, restore_char_generator (sax_employee_active_end),
+        employee_workday_string, restore_char_generator (sax_employee_workday_end),
+        employee_rate_string, restore_char_generator (sax_employee_rate_end),
+        employee_ccard_string, restore_char_generator (sax_employee_ccard_end),
+        employee_slots_string, sixtp_dom_parser_new_rooted (sax_employee_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, employee_addr_string, sax_address_parser_new (sax_employee_addr_start));
+
+    {
+        sixtp* cmdty = sax_commodity_ref_parser_new (sax_employee_currency_end);
+        sixtp_add_sub_parser (p, employee_currency_string, cmdty);
+        sixtp_add_sub_parser (p, "employee:commodity", cmdty);
+    }
+
+    return p;
 }
 
 static gboolean
