@@ -638,4 +638,52 @@ restore_char_generator (sixtp_end_handler ender)
                SIXTP_NO_MORE_HANDLERS);
 }
 
+/****************************************************************************/
+/* SAX-direct (non-DOM) helpers shared across the v2 object parsers.
+   See sixtp-utils.h for the rationale. */
+
+gboolean
+sax_passthrough_start (GSList*, gpointer parent_data, gpointer,
+                       gpointer* data_for_children, gpointer*,
+                       const gchar*, gchar**)
+{
+    *data_for_children = parent_data;
+    return TRUE;
+}
+
+sixtp*
+sax_commodity_ref_parser_new (sixtp_end_handler ender)
+{
+    sixtp* space_p = restore_char_generator (generic_return_chars_end_handler);
+    sixtp* id_p = restore_char_generator (generic_return_chars_end_handler);
+    sixtp_set_cleanup_result (space_p, sixtp_child_free_data);
+    sixtp_set_cleanup_result (id_p, sixtp_child_free_data);
+
+    sixtp* commodity = sixtp_new ();
+    sixtp_add_sub_parser (commodity, "cmdty:space", space_p);
+    sixtp_add_sub_parser (commodity, "cmdty:id", id_p);
+    sixtp_set_end (commodity, ender);
+    return commodity;
+}
+
+sixtp*
+sax_time64_parser_new (sixtp_end_handler ts_ender)
+{
+    sixtp* wrapper = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_passthrough_start,
+        SIXTP_NO_MORE_HANDLERS);
+    sixtp_add_sub_parser (wrapper, "ts:date", restore_char_generator (ts_ender));
+    sixtp_add_sub_parser (wrapper, "ts:ns",
+                          restore_char_generator (
+                              [] (gpointer, GSList* dfc, GSList*, gpointer, gpointer,
+                                  gpointer*, const gchar*) -> gboolean
+                              {
+                                  gchar* txt = concatenate_child_result_chars (dfc);
+                                  g_free (txt);
+                                  return TRUE;
+                              }));
+    return wrapper;
+}
+
 /***************************** END OF FILE *********************************/

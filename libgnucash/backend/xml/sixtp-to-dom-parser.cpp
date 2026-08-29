@@ -137,3 +137,95 @@ sixtp_dom_parser_new (sixtp_end_handler ender,
 
     return top_level;
 }
+
+/* dom_start_handler() decides whether it's building the root of a DOM
+   subtree or another node inside one already in progress by checking
+   whether parent_data is NULL. That works for sixtp_dom_parser_new()
+   because it is always plugged in directly under a plain sixtp_new()
+   parser (no start handler of its own, so parent_data is NULL at that
+   boundary). sixtp_dom_parser_new_rooted() is for the opposite case:
+   plugging a small DOM-based sub-parser (used for things like kvp
+   frames, which nest arbitrarily and aren't worth reimplementing as a
+   SAX-direct parser) into a tag of an otherwise SAX-direct, non-DOM
+   parser tree, where parent_data is some unrelated caller-owned struct,
+   not an xmlNodePtr. The entry point below forces the "start a new
+   root" branch unconditionally; every tag nested inside it goes back to
+   the ordinary, unrooted DOM builder, which does see real xmlNodePtr
+   parent_data from there on down. */
+static gboolean
+dom_start_handler_rooted (GSList* sibling_data, gpointer parent_data,
+                          gpointer global_data, gpointer* data_for_children,
+                          gpointer* result, const gchar* tag, gchar** attrs)
+{
+    return dom_start_handler (sibling_data, NULL, global_data,
+                              data_for_children, result, tag, attrs);
+}
+
+sixtp*
+sixtp_dom_parser_new_rooted (sixtp_end_handler ender,
+                             sixtp_result_handler cleanup_result_by_default_func,
+                             sixtp_result_handler cleanup_result_on_fail_func)
+{
+    sixtp* inner;
+    sixtp* entry;
+
+    g_return_val_if_fail (ender, NULL);
+
+    /* inner builds ordinary (non-root) DOM nodes for everything nested
+       inside the rooted entry point below. It deliberately has no end
+       handler of its own: a non-root dom_start_handler() call never
+       publishes *result (the built node is simply linked into its
+       parent via xmlNewChild(), and freed along with the rest of the
+       subtree when the caller's ender() frees the root), so there is
+       nothing for an end handler to do at these levels -- only the
+       root closing tag, handled by entry below, should ever call
+       ender(). */
+    if (! (inner =
+               sixtp_set_any (sixtp_new (), FALSE,
+                              SIXTP_START_HANDLER_ID, dom_start_handler,
+                              SIXTP_CHARACTERS_HANDLER_ID, dom_chars_handler,
+                              SIXTP_FAIL_HANDLER_ID, dom_fail_handler,
+                              SIXTP_NO_MORE_HANDLERS)))
+    {
+        return NULL;
+    }
+
+    if (!sixtp_add_sub_parser (inner, SIXTP_MAGIC_CATCHER, inner))
+    {
+        sixtp_destroy (inner);
+        return NULL;
+    }
+
+    if (! (entry =
+               sixtp_set_any (sixtp_new (), FALSE,
+                              SIXTP_START_HANDLER_ID, dom_start_handler_rooted,
+                              SIXTP_CHARACTERS_HANDLER_ID, dom_chars_handler,
+                              SIXTP_END_HANDLER_ID, ender,
+                              SIXTP_FAIL_HANDLER_ID, dom_fail_handler,
+                              SIXTP_NO_MORE_HANDLERS)))
+    {
+        sixtp_destroy (inner);
+        return NULL;
+    }
+
+    if (cleanup_result_by_default_func)
+    {
+        sixtp_set_cleanup_result (entry, cleanup_result_by_default_func);
+        sixtp_set_cleanup_result (inner, cleanup_result_by_default_func);
+    }
+
+    if (cleanup_result_on_fail_func)
+    {
+        sixtp_set_result_fail (entry, cleanup_result_on_fail_func);
+        sixtp_set_result_fail (inner, cleanup_result_on_fail_func);
+    }
+
+    if (!sixtp_add_sub_parser (entry, SIXTP_MAGIC_CATCHER, inner))
+    {
+        sixtp_destroy (inner);
+        sixtp_destroy (entry);
+        return NULL;
+    }
+
+    return entry;
+}

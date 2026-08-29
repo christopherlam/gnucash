@@ -35,4 +35,13 @@ sixtp* sixtp_dom_parser_new (sixtp_end_handler ender,
                              sixtp_result_handler cleanup_result_by_default_func,
                              sixtp_result_handler cleanup_result_on_fail_func);
 
+/* Same as sixtp_dom_parser_new(), but always starts a fresh DOM subtree
+   regardless of what its caller passes as parent_data. Use this to plug
+   a DOM-based sub-parser (e.g. for a kvp frame) into one tag of an
+   otherwise SAX-direct (non-DOM) parser tree, where the enclosing
+   parser's data_for_children isn't an xmlNodePtr. */
+sixtp* sixtp_dom_parser_new_rooted (sixtp_end_handler ender,
+                                    sixtp_result_handler cleanup_result_by_default_func,
+                                    sixtp_result_handler cleanup_result_on_fail_func);
+
 #endif /* _SIXTP_PARSERS_H_ */

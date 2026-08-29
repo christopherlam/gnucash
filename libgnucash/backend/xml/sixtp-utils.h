@@ -121,6 +121,66 @@ sixtp* generic_gnc_numeric_parser_new (void);
 
 sixtp* restore_char_generator (sixtp_end_handler ender);
 
+/* ---- shared helpers for SAX-direct (non-DOM) v2 object parsers ----
+ *
+ * These back the streaming parsers in gnc-transaction-xml-v2.cpp,
+ * gnc-account-xml-v2.cpp, and friends: reading a v2 record straight off
+ * the SAX character stream into the engine object, with no per-record
+ * xmlNodePtr ever built. See the "SAX-direct (streaming) parser"
+ * comments in gnc-transaction-xml-v2.cpp for the full rationale.
+ */
 
+/* Concatenate a leaf element's accumulated character fragments (no DOM
+   node is ever built for them) and hand the result to f; frees the
+   temporary string itself. Use as the body of a sixtp_end_handler
+   registered via restore_char_generator(). */
+template <typename F>
+inline gboolean
+sax_apply_chars (GSList* data_from_children, F&& f)
+{
+    gchar* txt = concatenate_child_result_chars (data_from_children);
+    if (!txt)
+        return FALSE;
+    gboolean ok = f (txt);
+    g_free (txt);
+    return ok;
+}
+
+/* For wrapper elements that have no text of their own (e.g.
+   trn:date-posted, act:currency's <cmdty:.../> pair's container) but
+   whose children need to see the same pdata pointer the wrapper itself
+   received: passes parent_data straight through as data_for_children. */
+gboolean sax_passthrough_start (GSList* sibling_data, gpointer parent_data,
+                                gpointer global_data,
+                                gpointer* data_for_children, gpointer* result,
+                                const gchar* tag, gchar** attrs);
+
+/* A <.../> wrapper with exactly a cmdty:space and cmdty:id child, e.g.
+
+     <price:commodity>
+       <cmdty:space>NASDAQ</cmdty:space>
+       <cmdty:id>RHAT</cmdty:id>
+     </price:commodity>
+
+   ender receives the two leaf values as SIXTP_CHILD_RESULT_NODE entries
+   (tags "cmdty:space"/"cmdty:id") in its data_from_children list --
+   look them up with is_child_result_from_node_named() -- and is
+   responsible for doing the book's commodity table lookup and applying
+   the result; parent_data is passed through unchanged from the wrapper
+   element's own parent, exactly as for any other sixtp_end_handler. */
+sixtp* sax_commodity_ref_parser_new (sixtp_end_handler ender);
+
+/* A <.../> wrapper containing exactly a ts:date child (v2's time64
+   encoding), tolerating an optional, ignored ts:ns sibling that some
+   older files still carry:
+
+     <trn:date-posted>
+       <ts:date>2020-01-01 10:59:00 +0000</ts:date>
+     </trn:date-posted>
+
+   ts_ender is the sixtp_end_handler for the inner ts:date leaf itself
+   (not the wrapper): it receives the wrapper's own parent_data
+   (via sax_passthrough_start()) and the accumulated ts:date text. */
+sixtp* sax_time64_parser_new (sixtp_end_handler ts_ender);
 
 #endif /* _SIXTP_UTILS_H_ */
