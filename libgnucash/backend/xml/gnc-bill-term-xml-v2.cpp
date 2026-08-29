@@ -28,6 +28,8 @@
 #include "gncBillTermP.h"
 #include "gncInvoice.h"
 #include "qof.h"
+#include <guid.hpp>
+#include <gnc-numeric.h>
 
 #include "gnc-xml-helper.h"
 
@@ -130,339 +132,332 @@ billterm_dom_tree_create (GncBillTerm* term)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) bill-term parser: reads a gnc:GncBillTerm
+ * straight off the SAX character stream, with no intermediate
+ * xmlNodePtr built for any of its fields. Nothing else in the codebase
+ * uses the old DOM-based parser this replaces, so it's gone entirely
+ * rather than kept around for reuse.
+ */
 
-struct billterm_pdata
+struct billterm_sax_pdata
 {
     GncBillTerm* term;
     QofBook* book;
 };
 
 static gboolean
-set_int (xmlNodePtr node, GncBillTerm* term,
-         void (*func) (GncBillTerm*, gint))
+sax_billterm_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
 {
-    gint64 val;
-    dom_tree_to_integer (node, &val);
-    func (term, val);
-    return TRUE;
-}
-
-static gboolean
-set_numeric (xmlNodePtr node, GncBillTerm* term,
-             void (*func) (GncBillTerm*, gnc_numeric))
-{
-    func (term, dom_tree_to_gnc_numeric (node));
-    return TRUE;
-}
-
-/***********************************************************************/
-
-static gboolean
-days_duedays_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_int (node, pdata->term, gncBillTermSetDueDays);
-}
-
-static gboolean
-days_discdays_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_int (node, pdata->term, gncBillTermSetDiscountDays);
-}
-
-static gboolean
-days_discount_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_numeric (node, pdata->term, gncBillTermSetDiscount);
-}
-
-static struct dom_tree_handler days_data_handlers_v2[] =
-{
-    { days_duedays_string, days_duedays_handler, 0, 0 },
-    { days_discdays_string, days_discdays_handler, 0, 0 },
-    { days_discount_string, days_discount_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static gboolean
-dom_tree_to_days_data (xmlNodePtr node, struct billterm_pdata* pdata)
-{
-    gboolean successful;
-
-    successful = dom_tree_generic_parse (node, days_data_handlers_v2, pdata);
-
-    if (!successful)
-        PERR ("failed to parse billing term days data");
-
-    return successful;
-}
-
-/***********************************************************************/
-
-static gboolean
-prox_dueday_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_int (node, pdata->term, gncBillTermSetDueDays);
-}
-
-static gboolean
-prox_discday_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_int (node, pdata->term, gncBillTermSetDiscountDays);
-}
-
-static gboolean
-prox_discount_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_numeric (node, pdata->term, gncBillTermSetDiscount);
-}
-
-static gboolean
-prox_cutoff_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_int (node, pdata->term, gncBillTermSetCutoff);
-}
-
-static struct dom_tree_handler prox_data_handlers_v2[] =
-{
-    { prox_dueday_string, prox_dueday_handler, 0, 0 },
-    { prox_discday_string, prox_discday_handler, 0, 0 },
-    { prox_discount_string, prox_discount_handler, 0, 0 },
-    { prox_cutoff_string, prox_cutoff_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static gboolean
-dom_tree_to_prox_data (xmlNodePtr node, struct billterm_pdata* pdata)
-{
-    gboolean successful;
-
-    successful = dom_tree_generic_parse (node, prox_data_handlers_v2, pdata);
-
-    if (!successful)
-        PERR ("failed to parse billing term prox data");
-
-    return successful;
-}
-
-/***********************************************************************/
-
-static gboolean
-set_parent_child (xmlNodePtr node, struct billterm_pdata* pdata,
-                  void (*func) (GncBillTerm*, GncBillTerm*))
-{
-    GncBillTerm* term;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    term = gncBillTermLookup (pdata->book, &*guid);
-    if (!term)
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
-        term = gncBillTermCreate (pdata->book);
-        gncBillTermBeginEdit (term);
-        gncBillTermSetGUID (term, &*guid);
-        gncBillTermCommitEdit (term);
-    }
-    g_return_val_if_fail (term, FALSE);
-    func (pdata->term, term);
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    return TRUE;
-}
-
-static gboolean
-billterm_guid_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    GncBillTerm* term;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    term = gncBillTermLookup (pdata->book, &*guid);
-    if (term)
-    {
-        gncBillTermDestroy (pdata->term);
-        pdata->term = term;
-        gncBillTermBeginEdit (term);
-    }
-    else
-    {
-        gncBillTermSetGUID (pdata->term, &*guid);
-    }
-
-    return TRUE;
-}
-
-static gboolean
-billterm_name_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return apply_xmlnode_text (gncBillTermSetName, pdata->term, node);
-}
-
-static gboolean
-billterm_desc_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return apply_xmlnode_text (gncBillTermSetDescription, pdata->term, node);
-}
-
-static gboolean
-billterm_refcount_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    gint64 val;
-
-    dom_tree_to_integer (node, &val);
-    gncBillTermSetRefcount (pdata->term, val);
-    return TRUE;
-}
-
-static gboolean
-billterm_invisible_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    gint64 val;
-
-    dom_tree_to_integer (node, &val);
-    if (val)
-        gncBillTermMakeInvisible (pdata->term);
-    return TRUE;
-}
-
-static gboolean
-billterm_parent_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_parent_child (node, pdata, gncBillTermSetParent);
-}
-
-static gboolean
-billterm_child_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return set_parent_child (node, pdata, gncBillTermSetChild);
-}
-
-static gboolean
-billterm_days_data_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-
-    g_return_val_if_fail (node, FALSE);
-    g_return_val_if_fail (gncBillTermGetType (pdata->term) == 0, FALSE);
-
-    gncBillTermSetType (pdata->term, GNC_TERM_TYPE_DAYS);
-    return dom_tree_to_days_data (node, pdata);
-}
-
-static gboolean
-billterm_prox_data_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-
-    g_return_val_if_fail (node, FALSE);
-    g_return_val_if_fail (gncBillTermGetType (pdata->term) == 0, FALSE);
-
-    gncBillTermSetType (pdata->term, GNC_TERM_TYPE_PROXIMO);
-    return dom_tree_to_prox_data (node, pdata);
-}
-
-static gboolean
-billterm_slots_handler (xmlNodePtr node, gpointer billterm_pdata)
-{
-    struct billterm_pdata* pdata = static_cast<decltype (pdata)> (billterm_pdata);
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->term));
-}
-
-static struct dom_tree_handler billterm_handlers_v2[] =
-{
-    { billterm_guid_string, billterm_guid_handler, 1, 0 },
-    { billterm_name_string, billterm_name_handler, 1, 0 },
-    { billterm_desc_string, billterm_desc_handler, 1, 0 },
-    { billterm_refcount_string, billterm_refcount_handler, 1, 0 },
-    { billterm_invisible_string, billterm_invisible_handler, 1, 0 },
-    { billterm_parent_string, billterm_parent_handler, 0, 0 },
-    { billterm_child_string, billterm_child_handler, 0, 0 },
-    { billterm_slots_string, billterm_slots_handler, 0, 0 },
-    { gnc_daystype_string, billterm_days_data_handler, 0, 0 },
-    { gnc_proximotype_string, billterm_prox_data_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncBillTerm*
-dom_tree_to_billterm (xmlNodePtr node, QofBook* book)
-{
-    struct billterm_pdata billterm_pdata;
-    gboolean successful;
-
-    billterm_pdata.term = gncBillTermCreate (book);
-    billterm_pdata.book = book;
-    gncBillTermBeginEdit (billterm_pdata.term);
-
-    successful = dom_tree_generic_parse (node, billterm_handlers_v2,
-                                         &billterm_pdata);
-
-    if (successful)
-    {
-        gncBillTermCommitEdit (billterm_pdata.term);
-    }
-    else
-    {
-        PERR ("failed to parse billing term tree");
-        gncBillTermDestroy (billterm_pdata.term);
-        billterm_pdata.term = NULL;
-    }
-
-    return billterm_pdata.term;
-}
-
-static gboolean
-gnc_billterm_end_handler (gpointer data_for_children,
-                          GSList* data_from_children, GSList* sibling_data,
-                          gpointer parent_data, gpointer global_data,
-                          gpointer* result, const gchar* tag)
-{
-    GncBillTerm* term;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-
-    if (parent_data)
-    {
+        /* If a term with this guid already exists -- e.g. created as a
+           placeholder by an earlier billterm:parent/billterm:child ref
+           elsewhere in the file -- adopt it instead of the fresh one
+           sax_billterm_start() allocated, and keep filling in fields on
+           that one. */
+        GncBillTerm* term = gncBillTermLookup (pdata->book, &guid);
+        if (term)
+        {
+            gncBillTermDestroy (pdata->term);
+            pdata->term = term;
+            gncBillTermBeginEdit (term);
+        }
+        else
+            gncBillTermSetGUID (pdata->term, &guid);
         return TRUE;
-    }
+    });
+}
 
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
+static gboolean
+sax_billterm_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncBillTermSetName (pdata->term, txt); return TRUE; });
+}
+
+static gboolean
+sax_billterm_desc_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncBillTermSetDescription (pdata->term, txt); return TRUE; });
+}
+
+static gboolean
+sax_billterm_refcount_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncBillTermSetRefcount (pdata->term, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_invisible_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        if (val)
+            gncBillTermMakeInvisible (pdata->term);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_parent_child_end (GncBillTerm* term, QofBook* book, const char* txt,
+                               void (*func) (GncBillTerm*, GncBillTerm*))
+{
+    GncGUID guid;
+    if (!string_to_guid (txt, &guid)) return FALSE;
+
+    GncBillTerm* other = gncBillTermLookup (book, &guid);
+    if (!other)
+    {
+        other = gncBillTermCreate (book);
+        gncBillTermBeginEdit (other);
+        gncBillTermSetGUID (other, &guid);
+        gncBillTermCommitEdit (other);
+    }
+    func (term, other);
+    return TRUE;
+}
+
+static gboolean
+sax_billterm_parent_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { return sax_billterm_parent_child_end (pdata->term, pdata->book, txt, gncBillTermSetParent); });
+}
+
+static gboolean
+sax_billterm_child_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                        gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { return sax_billterm_parent_child_end (pdata->term, pdata->book, txt, gncBillTermSetChild); });
+}
+
+static gboolean
+sax_billterm_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                            gpointer parent_data, gpointer, gpointer* result,
+                            const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->term));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+/* billterm:days and billterm:proximo are mutually exclusive (a term is
+   either type); their own start handler enforces that the same way the
+   original's g_return_val_if_fail(gncBillTermGetType(term) == 0, ...)
+   did, then sets the type immediately so it's in place before any of
+   the wrapper's own children run. */
+
+static gboolean
+sax_billterm_days_start (GSList*, gpointer parent_data, gpointer,
+                         gpointer* data_for_children, gpointer*,
+                         const gchar*, gchar**)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    if (gncBillTermGetType (pdata->term) != 0) return FALSE;
+    gncBillTermSetType (pdata->term, GNC_TERM_TYPE_DAYS);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_billterm_prox_start (GSList*, gpointer parent_data, gpointer,
+                         gpointer* data_for_children, gpointer*,
+                         const gchar*, gchar**)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    if (gncBillTermGetType (pdata->term) != 0) return FALSE;
+    gncBillTermSetType (pdata->term, GNC_TERM_TYPE_PROXIMO);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_billterm_duedays_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                          gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncBillTermSetDueDays (pdata->term, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_discdays_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncBillTermSetDiscountDays (pdata->term, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_discount_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                           gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        gncBillTermSetDiscount (pdata->term, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_cutoff_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncBillTermSetCutoff (pdata->term, val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_billterm_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                    gpointer*, const gchar* tag, gchar**)
+{
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (billterm_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->term = gncBillTermCreate (pdata->book);
+    gncBillTermBeginEdit (pdata->term);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_billterm_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+                  gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
 
-    term = dom_tree_to_billterm (tree, book);
-    if (term != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, term);
-    }
+    if (!tag)
+        return TRUE;
 
-    xmlFreeNode (tree);
+    GncBillTerm* term = pdata->term;
+    g_free (pdata);
 
-    return term != NULL;
+    gncBillTermCommitEdit (term);
+    gdata->cb (tag, gdata->parsedata, term);
+    return TRUE;
+}
+
+static void
+sax_billterm_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                   gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<billterm_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncBillTermDestroy (pdata->term);
+    g_free (pdata);
 }
 
 static sixtp*
 billterm_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_billterm_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_billterm_start,
+        SIXTP_END_HANDLER_ID, sax_billterm_end,
+        SIXTP_FAIL_HANDLER_ID, sax_billterm_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        billterm_guid_string, restore_char_generator (sax_billterm_guid_end),
+        billterm_name_string, restore_char_generator (sax_billterm_name_end),
+        billterm_desc_string, restore_char_generator (sax_billterm_desc_end),
+        billterm_refcount_string, restore_char_generator (sax_billterm_refcount_end),
+        billterm_invisible_string, restore_char_generator (sax_billterm_invisible_end),
+        billterm_parent_string, restore_char_generator (sax_billterm_parent_end),
+        billterm_child_string, restore_char_generator (sax_billterm_child_end),
+        billterm_slots_string, sixtp_dom_parser_new_rooted (sax_billterm_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    {
+        sixtp* days = sixtp_set_any (
+            sixtp_new (), FALSE,
+            SIXTP_START_HANDLER_ID, sax_billterm_days_start,
+            SIXTP_NO_MORE_HANDLERS);
+        sixtp_add_some_sub_parsers (
+            days, TRUE,
+            days_duedays_string, restore_char_generator (sax_billterm_duedays_end),
+            days_discdays_string, restore_char_generator (sax_billterm_discdays_end),
+            days_discount_string, restore_char_generator (sax_billterm_discount_end),
+            NULL, NULL);
+        sixtp_add_sub_parser (p, gnc_daystype_string, days);
+    }
+    {
+        sixtp* prox = sixtp_set_any (
+            sixtp_new (), FALSE,
+            SIXTP_START_HANDLER_ID, sax_billterm_prox_start,
+            SIXTP_NO_MORE_HANDLERS);
+        sixtp_add_some_sub_parsers (
+            prox, TRUE,
+            prox_dueday_string, restore_char_generator (sax_billterm_duedays_end),
+            prox_discday_string, restore_char_generator (sax_billterm_discdays_end),
+            prox_discount_string, restore_char_generator (sax_billterm_discount_end),
+            prox_cutoff_string, restore_char_generator (sax_billterm_cutoff_end),
+            NULL, NULL);
+        sixtp_add_sub_parser (p, gnc_proximotype_string, prox);
+    }
+
+    return p;
 }
 
 static void
