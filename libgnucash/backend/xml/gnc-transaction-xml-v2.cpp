@@ -30,6 +30,9 @@
 #include "TransactionP.hpp"
 #include "gnc-lot.h"
 #include "gnc-lot-p.h"
+#include <gnc-numeric.h>
+#include <gnc-date.h>
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 
@@ -514,42 +517,6 @@ struct dom_tree_handler trn_dom_handlers[] =
     { NULL, NULL, 0, 0 },
 };
 
-static gboolean
-gnc_transaction_end_handler (gpointer data_for_children,
-                             GSList* data_from_children, GSList* sibling_data,
-                             gpointer parent_data, gpointer global_data,
-                             gpointer* result, const gchar* tag)
-{
-    Transaction* trn = NULL;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
-    if (!tag)
-    {
-        return TRUE;
-    }
-
-    g_return_val_if_fail (tree, FALSE);
-
-    trn = dom_tree_to_transaction (tree,
-                                   static_cast<QofBook*> (gdata->bookdata));
-    if (trn != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, trn);
-    }
-
-    xmlFreeNode (tree);
-
-    return trn != NULL;
-}
-
 Transaction*
 dom_tree_to_transaction (xmlNodePtr node, QofBook* book)
 {
@@ -583,8 +550,490 @@ dom_tree_to_transaction (xmlNodePtr node, QofBook* book)
     return trn;
 }
 
+/***********************************************************************/
+/* SAX-direct (streaming) transaction/split parser.
+ *
+ * dom_tree_to_transaction()/dom_tree_to_split() above are unchanged and
+ * still used for gnc:template-transactions (scheduled transactions),
+ * which hand them an already-built DOM subtree. But gnc:transaction
+ * itself -- by far the highest-volume element in a real data file --
+ * no longer needs sixtp_dom_parser_new() at all: every scalar field
+ * (id, currency, num, dates, description, and every split's id/memo/
+ * action/reconciled-state/value/quantity/account/lot) is applied
+ * straight off the SAX character stream below, with no intermediate
+ * xmlNodePtr ever built for any of it. Only trn:slots/split:slots (kvp
+ * frames, which nest arbitrarily) still go through a narrowly scoped
+ * DOM sub-parser via sixtp_dom_parser_new_rooted().
+ */
+
+struct trans_sax_pdata
+{
+    Transaction* trans;
+    QofBook* book;
+};
+
+struct split_sax_pdata
+{
+    Split* split;
+    QofBook* book;
+};
+
+/* sax_apply_chars() and sax_passthrough_start() are declared in
+   sixtp-utils.h and shared with the other SAX-direct v2 parsers. */
+
+/* dom_tree_to_time64()/parse_commodity_ref() (used by the still-DOM-based
+   dom_tree_to_transaction() path) silently ignore any element they don't
+   recognize inside a date or commodity-ref wrapper -- notably a lone
+   ts:ns (nanoseconds) sibling of ts:date that some older files carry,
+   even though the current writer never emits one. sax_time64_parser_new()
+   (shared, sixtp-utils.h) already tolerates and discards it. */
+
+/* ---- split leaf handlers ------------------------------------------ */
+
+static gboolean
+sax_spl_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        xaccSplitSetGUID (pdata->split, &guid);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_memo_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                  gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccSplitSetMemo (pdata->split, txt); return TRUE; });
+}
+
+static gboolean
+sax_spl_action_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccSplitSetAction (pdata->split, txt); return TRUE; });
+}
+
+static gboolean
+sax_spl_reconciled_state_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                              gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    /* txt[0] is '\0' for empty content; that's an accepted (if
+       degenerate) reconciled-state value, not an error. */
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        xaccSplitSetReconcile (pdata->split, txt[0]);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_reconcile_date_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                               gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST "split:reconcile-date")) t = 0;
+        xaccSplitSetDateReconciledSecs (pdata->split, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_value_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                   gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    /* Malformed or empty content falls back to zero rather than failing
+       the whole split -- some legacy/test data has empty value fields. */
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        xaccSplitSetValue (pdata->split, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_quantity_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gnc_numeric num = gnc_numeric_from_string (txt);
+        xaccSplitSetAmount (pdata->split, gnc_numeric_check (num) ? gnc_numeric_zero () : num);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_account_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID id;
+        if (!string_to_guid (txt, &id)) return FALSE;
+
+        Account* account = xaccAccountLookup (&id, pdata->book);
+        if (!account && gnc_transaction_xml_v2_testing &&
+            !guid_equal (&id, guid_null ()))
+        {
+            account = xaccMallocAccount (pdata->book);
+            xaccAccountSetGUID (account, &id);
+            xaccAccountSetCommoditySCU (account,
+                                        xaccSplitGetAmount (pdata->split).denom);
+        }
+        xaccAccountInsertSplit (account, pdata->split);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_lot_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                 gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID id;
+        if (!string_to_guid (txt, &id)) return FALSE;
+
+        GNCLot* lot = gnc_lot_lookup (&id, pdata->book);
+        if (!lot && gnc_transaction_xml_v2_testing &&
+            !guid_equal (&id, guid_null ()))
+        {
+            lot = gnc_lot_new (pdata->book);
+            gnc_lot_set_guid (lot, id);
+        }
+        gnc_lot_add_split (lot, pdata->split);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_spl_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                       gpointer parent_data, gpointer, gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->split));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+static gboolean
+sax_spl_start (GSList*, gpointer parent_data, gpointer, gpointer* data_for_children,
+              gpointer*, const gchar*, gchar**)
+{
+    auto* trn_pdata = static_cast<trans_sax_pdata*> (parent_data);
+    auto* pdata = g_new (split_sax_pdata, 1);
+    pdata->book = trn_pdata->book;
+    pdata->split = xaccMallocSplit (pdata->book);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_spl_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+            gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (data_for_children);
+    *result = pdata->split;
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_spl_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+             gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<split_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    xaccSplitDestroy (pdata->split);
+    g_free (pdata);
+}
+
+static sixtp*
+sax_split_parser_new (void)
+{
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_spl_start,
+        SIXTP_END_HANDLER_ID, sax_spl_end,
+        SIXTP_FAIL_HANDLER_ID, sax_spl_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        "split:id", restore_char_generator (sax_spl_id_end),
+        "split:memo", restore_char_generator (sax_spl_memo_end),
+        "split:action", restore_char_generator (sax_spl_action_end),
+        "split:reconciled-state", restore_char_generator (sax_spl_reconciled_state_end),
+        "split:value", restore_char_generator (sax_spl_value_end),
+        "split:quantity", restore_char_generator (sax_spl_quantity_end),
+        "split:account", restore_char_generator (sax_spl_account_end),
+        "split:lot", restore_char_generator (sax_spl_lot_end),
+        "split:slots", sixtp_dom_parser_new_rooted (sax_spl_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, "split:reconcile-date",
+                          sax_time64_parser_new (sax_spl_reconcile_date_ts_end));
+
+    return p;
+}
+
+/* ---- transaction leaf handlers ------------------------------------ */
+
+static gboolean
+sax_trn_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        xaccTransSetGUID (pdata->trans, &guid);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_trn_num_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                 gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccTransSetNum (pdata->trans, txt); return TRUE; });
+}
+
+static gboolean
+sax_trn_description_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { xaccTransSetDescription (pdata->trans, txt); return TRUE; });
+}
+
+static gboolean
+sax_trn_date_posted_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST "trn:date-posted")) t = 0;
+        xaccTransSetDatePostedSecs (pdata->trans, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_trn_date_entered_ts_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                             gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        time64 t = gnc_iso8601_to_time64_gmt (txt);
+        if (!dom_tree_valid_time64 (t, BAD_CAST "trn:date-entered")) t = 0;
+        xaccTransSetDateEnteredSecs (pdata->trans, t);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_trn_currency_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
+
+    for (GSList* lp = dfc; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
+    }
+    /* An unresolvable currency ref sets a NULL currency rather than
+       failing the whole transaction parse. */
+    gnc_commodity* ref = nullptr;
+    if (space && id)
+    {
+        /* trim in place; these buffers are owned by the child results
+           and freed automatically once this end handler returns */
+        g_strstrip (space);
+        g_strstrip (id);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        if (table)
+            ref = gnc_commodity_table_lookup (table, space, id);
+    }
+
+    xaccTransSetCurrency (pdata->trans, ref);
+    return TRUE;
+}
+
+static gboolean
+sax_trn_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                       gpointer parent_data, gpointer, gpointer* result, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ok = TRUE;
+    if (tree)
+    {
+        ok = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->trans));
+        xmlFreeNode (tree);
+    }
+    *result = nullptr;
+    return ok;
+}
+
+static gboolean
+sax_trn_splits_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                    gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (parent_data);
+    /* data_from_children is youngest-first; reverse it to restore
+       document (and thus split) order. */
+    GSList* ordered = g_slist_reverse (g_slist_copy (dfc));
+    for (GSList* lp = ordered; lp; lp = lp->next)
+    {
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        xaccTransAppendSplit (pdata->trans, static_cast<Split*> (cr->data));
+    }
+    g_slist_free (ordered);
+    return TRUE;
+}
+
+static gboolean
+sax_trn_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+              gpointer*, const gchar* tag, gchar**)
+{
+    /* When this parser is used as sixtp_parse_file()'s top-level parser
+       (as in gnc_transaction_sixtp_parser_create()'s standalone-file test
+       usage below), sixtp calls the start handler an extra, harmless
+       first time for the synthetic top frame, with tag == NULL. Don't
+       allocate a Transaction for that call -- only for the real
+       gnc:transaction element. */
+    if (!tag)
+    {
+        *data_for_children = nullptr;
+        return TRUE;
+    }
+
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    auto* pdata = g_new (trans_sax_pdata, 1);
+    pdata->book = static_cast<QofBook*> (gdata->bookdata);
+    pdata->trans = xaccMallocTransaction (pdata->book);
+    xaccTransBeginEdit (pdata->trans);
+    *data_for_children = pdata;
+    return TRUE;
+}
+
+static gboolean
+sax_trn_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+            gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (data_for_children);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+
+    /* Called an extra, harmless time with a NULL tag for the synthetic
+       top frame; see sax_trn_start() above. */
+    if (!tag)
+        return TRUE;
+
+    xaccTransCommitEdit (pdata->trans);
+    gdata->cb (tag, gdata->parsedata, pdata->trans);
+    g_free (pdata);
+    return TRUE;
+}
+
+static void
+sax_trn_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+             gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<trans_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    xaccTransDestroy (pdata->trans);
+    xaccTransCommitEdit (pdata->trans);
+    g_free (pdata);
+}
+
 sixtp*
 gnc_transaction_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_transaction_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_trn_start,
+        SIXTP_END_HANDLER_ID, sax_trn_end,
+        SIXTP_FAIL_HANDLER_ID, sax_trn_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        "trn:id", restore_char_generator (sax_trn_id_end),
+        "trn:num", restore_char_generator (sax_trn_num_end),
+        "trn:description", restore_char_generator (sax_trn_description_end),
+        "trn:slots", sixtp_dom_parser_new_rooted (sax_trn_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, "trn:currency",
+                          sax_commodity_ref_parser_new (sax_trn_currency_end));
+    sixtp_add_sub_parser (p, "trn:date-posted",
+                          sax_time64_parser_new (sax_trn_date_posted_ts_end));
+    sixtp_add_sub_parser (p, "trn:date-entered",
+                          sax_time64_parser_new (sax_trn_date_entered_ts_end));
+    {
+        sixtp* splits = sixtp_set_any (
+            sixtp_new (), FALSE,
+            SIXTP_START_HANDLER_ID, sax_passthrough_start,
+            SIXTP_END_HANDLER_ID, sax_trn_splits_end,
+            SIXTP_NO_MORE_HANDLERS);
+        sixtp_add_sub_parser (splits, "trn:split", sax_split_parser_new ());
+        sixtp_add_sub_parser (p, "trn:splits", splits);
+    }
+
+    /* Self-reference under our own tag: sixtp always looks up an
+       element's parser as a *child* of whatever parser is current when
+       the element's start tag is seen -- including the outermost
+       element, looked up as a child of the synthetic top frame. When p
+       is nested under book_parser/main_parser (the normal book-loading
+       path), that lookup is book_parser's to do and this registration
+       is never consulted. But p is also used standalone, as the
+       top-level parser passed straight to gnc_xml_parse_file() (see
+       test-xml-transaction.cpp), where p itself must already recognize
+       "gnc:transaction" as its own child for that first lookup to
+       succeed. */
+    sixtp_add_sub_parser (p, "gnc:transaction", p);
+
+    return p;
 }
