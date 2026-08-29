@@ -29,6 +29,7 @@
 #include "gncBillTermP.h"
 #include "gncVendorP.h"
 #include "gncTaxTableP.h"
+#include <guid.hpp>
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -48,8 +49,6 @@
 #include "gnc-bill-term-xml-v2.h"
 
 #define _GNC_MOD_NAME   GNC_ID_VENDOR
-
-static QofLogModule log_module = GNC_MOD_IO;
 
 const gchar* vendor_version_string = "2.0.0";
 
@@ -123,252 +122,287 @@ vendor_dom_tree_create (GncVendor* vendor)
 }
 
 /***********************************************************************/
+/* SAX-direct (streaming) vendor parser: reads a gnc:GncVendor straight
+   off the SAX character stream, with no intermediate xmlNodePtr built
+   for any of its fields. Nothing else in the codebase uses the old
+   DOM-based parser this replaces, so it's gone entirely. */
 
-struct vendor_pdata
+struct vendor_sax_pdata
 {
     GncVendor* vendor;
     QofBook* book;
 };
 
 static gboolean
-set_boolean (xmlNodePtr node, GncVendor* vendor,
-             void (*func) (GncVendor* vendor, gboolean b))
+sax_vendor_guid_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
 {
-    gint64 val;
-    gboolean ret;
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
 
-    ret = dom_tree_to_integer (node, &val);
-    if (ret)
-        func (vendor, (gboolean)val);
+        /* Adopt a vendor that already exists by this guid (e.g. a
+           placeholder created earlier by an owner or invoice
+           reference) instead of the fresh one sax_vendor_start()
+           made. */
+        GncVendor* vendor = gncVendorLookup (pdata->book, &guid);
+        if (vendor)
+        {
+            gncVendorDestroy (pdata->vendor);
+            pdata->vendor = vendor;
+            gncVendorBeginEdit (vendor);
+        }
+        else
+            gncVendorSetGUID (pdata->vendor, &guid);
+        return TRUE;
+    });
+}
 
+static gboolean
+sax_vendor_name_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                     gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncVendorSetName (pdata->vendor, txt); return TRUE; });
+}
+
+static gboolean
+sax_vendor_id_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                   gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncVendorSetID (pdata->vendor, txt); return TRUE; });
+}
+
+static gboolean
+sax_vendor_notes_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    { gncVendorSetNotes (pdata->vendor, txt); return TRUE; });
+}
+
+static gboolean
+sax_vendor_terms_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                      gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+        GncBillTerm* term = gnc_billterm_xml_find_or_create (pdata->book, &guid);
+        g_assert (term);
+        gncVendorSetTerms (pdata->vendor, term);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_vendor_taxincluded_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                            gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncTaxIncluded type;
+        if (gncTaxIncludedStringToType (txt, &type))
+            gncVendorSetTaxIncluded (pdata->vendor, type);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_vendor_active_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                       gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncVendorSetActive (pdata->vendor, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_vendor_taxtable_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        GncGUID guid;
+        if (!string_to_guid (txt, &guid)) return FALSE;
+
+        GncTaxTable* taxtable = gncTaxTableLookup (pdata->book, &guid);
+        if (!taxtable)
+        {
+            taxtable = gncTaxTableCreate (pdata->book);
+            gncTaxTableBeginEdit (taxtable);
+            gncTaxTableSetGUID (taxtable, &guid);
+            gncTaxTableCommitEdit (taxtable);
+        }
+        else
+            gncTaxTableDecRef (taxtable);
+
+        gncVendorSetTaxTable (pdata->vendor, taxtable);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_vendor_taxtableoverride_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                                 gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
+    {
+        gint64 val = 0;
+        string_to_gint64 (txt, &val);
+        gncVendorSetTaxTableOverride (pdata->vendor, (gboolean) val);
+        return TRUE;
+    });
+}
+
+static gboolean
+sax_vendor_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
+                          gpointer parent_data, gpointer, gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    xmlNodePtr tree = static_cast<xmlNodePtr> (data_for_children);
+    gboolean ret = dom_tree_create_instance_slots (tree, QOF_INSTANCE (pdata->vendor));
+    xmlFreeNode (tree);
     return ret;
 }
 
 static gboolean
-vendor_name_handler (xmlNodePtr node, gpointer vendor_pdata)
+sax_vendor_addr_start (GSList*, gpointer parent_data, gpointer,
+                       gpointer* data_for_children, gpointer*, const gchar*, gchar**)
 {
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-
-    return apply_xmlnode_text (gncVendorSetName, pdata->vendor, node);
-}
-
-static gboolean
-vendor_guid_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    GncVendor* vendor;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    vendor = gncVendorLookup (pdata->book, &*guid);
-    if (vendor)
-    {
-        gncVendorDestroy (pdata->vendor);
-        pdata->vendor = vendor;
-        gncVendorBeginEdit (vendor);
-    }
-    else
-    {
-        gncVendorSetGUID (pdata->vendor, &*guid);
-    }
-
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    *data_for_children = gncVendorGetAddr (pdata->vendor);
     return TRUE;
 }
 
 static gboolean
-vendor_id_handler (xmlNodePtr node, gpointer vendor_pdata)
+sax_vendor_currency_end (gpointer, GSList* dfc, GSList*, gpointer parent_data,
+                         gpointer, gpointer*, const gchar*)
 {
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
+    auto* pdata = static_cast<vendor_sax_pdata*> (parent_data);
+    gchar* space = nullptr;
+    gchar* id = nullptr;
 
-    return apply_xmlnode_text (gncVendorSetID, pdata->vendor, node);
-}
-
-static gboolean
-vendor_notes_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-
-    return apply_xmlnode_text (gncVendorSetNotes, pdata->vendor, node);
-}
-
-static gboolean
-vendor_terms_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    GncBillTerm* term;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    term = gnc_billterm_xml_find_or_create (pdata->book, &*guid);
-    g_assert (term);
-    gncVendorSetTerms (pdata->vendor, term);
-
-    return TRUE;
-}
-
-static gboolean
-vendor_addr_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-
-    return gnc_dom_tree_to_address (node, gncVendorGetAddr (pdata->vendor));
-}
-
-static gboolean
-vendor_taxincluded_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    auto set_taxincluded = [](GncVendor* vendor, const char* str)
+    for (GSList* lp = dfc; lp; lp = lp->next)
     {
-        GncTaxIncluded type;
-        if (gncTaxIncludedStringToType (str, &type))
-            gncVendorSetTaxIncluded (vendor, type);
-    };
-    return apply_xmlnode_text (set_taxincluded, pdata->vendor, node);
-}
+        auto* cr = static_cast<sixtp_child_result*> (lp->data);
+        if (is_child_result_from_node_named (cr, "cmdty:space"))
+            space = static_cast<gchar*> (cr->data);
+        else if (is_child_result_from_node_named (cr, "cmdty:id"))
+            id = static_cast<gchar*> (cr->data);
+    }
 
-static gboolean
-vendor_active_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    return set_boolean (node, pdata->vendor, gncVendorSetActive);
-}
-
-static gboolean
-vendor_currency_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    gnc_commodity* com;
-
-    com = dom_tree_to_commodity_ref (node, pdata->book);
+    gnc_commodity* com = nullptr;
+    if (space && id)
+    {
+        g_strstrip (space);
+        g_strstrip (id);
+        auto* table = gnc_commodity_table_get_table (pdata->book);
+        if (table)
+            com = gnc_commodity_table_lookup (table, space, id);
+    }
     g_return_val_if_fail (com, FALSE);
-
     gncVendorSetCurrency (pdata->vendor, com);
-
     return TRUE;
 }
 
 static gboolean
-vendor_taxtable_handler (xmlNodePtr node, gpointer vendor_pdata)
+sax_vendor_start (GSList*, gpointer, gpointer global_data, gpointer* data_for_children,
+                  gpointer*, const gchar* tag, gchar**)
 {
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    GncTaxTable* taxtable;
-
-    auto guid = dom_tree_to_guid (node);
-    g_return_val_if_fail (guid, FALSE);
-    taxtable = gncTaxTableLookup (pdata->book, &*guid);
-    if (!taxtable)
-    {
-        taxtable = gncTaxTableCreate (pdata->book);
-        gncTaxTableBeginEdit (taxtable);
-        gncTaxTableSetGUID (taxtable, &*guid);
-        gncTaxTableCommitEdit (taxtable);
-    }
-    else
-        gncTaxTableDecRef (taxtable);
-
-    gncVendorSetTaxTable (pdata->vendor, taxtable);
-    return TRUE;
-}
-
-static gboolean
-vendor_taxtableoverride_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    return set_boolean (node, pdata->vendor, gncVendorSetTaxTableOverride);
-}
-
-static gboolean
-vendor_slots_handler (xmlNodePtr node, gpointer vendor_pdata)
-{
-    struct vendor_pdata* pdata = static_cast<decltype (pdata)> (vendor_pdata);
-    return dom_tree_create_instance_slots (node, QOF_INSTANCE (pdata->vendor));
-
-}
-
-static struct dom_tree_handler vendor_handlers_v2[] =
-{
-    { vendor_name_string, vendor_name_handler, 1, 0 },
-    { vendor_guid_string, vendor_guid_handler, 1, 0 },
-    { vendor_id_string, vendor_id_handler, 1, 0 },
-    { vendor_addr_string, vendor_addr_handler, 1, 0 },
-    { vendor_notes_string, vendor_notes_handler, 0, 0 },
-    { vendor_terms_string, vendor_terms_handler, 0, 0 },
-    { vendor_taxincluded_string, vendor_taxincluded_handler, 1, 0 },
-    { vendor_active_string, vendor_active_handler, 1, 0 },
-    { vendor_currency_string, vendor_currency_handler, 0, 0 }, /* XXX */
-    { "vendor:commodity", vendor_currency_handler, 0, 0 }, /* XXX */
-    { vendor_taxtable_string, vendor_taxtable_handler, 0, 0 },
-    { vendor_taxtableoverride_string, vendor_taxtableoverride_handler, 0, 0 },
-    { vendor_slots_string, vendor_slots_handler, 0, 0 },
-    { NULL, 0, 0, 0 }
-};
-
-static GncVendor*
-dom_tree_to_vendor (xmlNodePtr node, QofBook* book)
-{
-    struct vendor_pdata vendor_pdata;
-    gboolean successful;
-
-    vendor_pdata.vendor = gncVendorCreate (book);
-    vendor_pdata.book = book;
-    gncVendorBeginEdit (vendor_pdata.vendor);
-
-    successful = dom_tree_generic_parse (node, vendor_handlers_v2,
-                                         &vendor_pdata);
-
-    if (successful)
-        gncVendorCommitEdit (vendor_pdata.vendor);
-    else
-    {
-        PERR ("failed to parse vendor tree");
-        gncVendorDestroy (vendor_pdata.vendor);
-        vendor_pdata.vendor = NULL;
-    }
-
-    return vendor_pdata.vendor;
-}
-
-static gboolean
-gnc_vendor_end_handler (gpointer data_for_children,
-                        GSList* data_from_children, GSList* sibling_data,
-                        gpointer parent_data, gpointer global_data,
-                        gpointer* result, const gchar* tag)
-{
-    GncVendor* vendor;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
     if (!tag)
     {
+        *data_for_children = nullptr;
         return TRUE;
     }
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    QofBook* book = static_cast<QofBook*> (gdata->bookdata);
+    auto* pdata = g_new (vendor_sax_pdata, 1);
+    pdata->vendor = gncVendorCreate (book);
+    pdata->book = book;
+    gncVendorBeginEdit (pdata->vendor);
+    *data_for_children = pdata;
+    return TRUE;
+}
 
-    g_return_val_if_fail (tree, FALSE);
+static gboolean
+sax_vendor_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer global_data,
+                gpointer*, const gchar* tag)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (data_for_children);
+    if (!pdata) return TRUE;
+    if (!tag) { g_free (pdata); return TRUE; }
 
-    vendor = dom_tree_to_vendor (tree, book);
-    if (vendor != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, vendor);
-    }
+    GncVendor* vendor = pdata->vendor;
+    g_free (pdata);
 
-    xmlFreeNode (tree);
+    gncVendorCommitEdit (vendor);
+    auto* gdata = static_cast<gxpf_data*> (global_data);
+    gdata->cb (tag, gdata->parsedata, vendor);
+    return TRUE;
+}
 
-    return vendor != NULL;
+static void
+sax_vendor_fail (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer,
+                 gpointer*, const gchar*)
+{
+    auto* pdata = static_cast<vendor_sax_pdata*> (data_for_children);
+    if (!pdata) return;
+    gncVendorDestroy (pdata->vendor);
+    g_free (pdata);
 }
 
 static sixtp*
 vendor_sixtp_parser_create (void)
 {
-    return sixtp_dom_parser_new (gnc_vendor_end_handler, NULL, NULL);
+    sixtp* p = sixtp_set_any (
+        sixtp_new (), FALSE,
+        SIXTP_START_HANDLER_ID, sax_vendor_start,
+        SIXTP_END_HANDLER_ID, sax_vendor_end,
+        SIXTP_FAIL_HANDLER_ID, sax_vendor_fail,
+        SIXTP_NO_MORE_HANDLERS);
+    g_return_val_if_fail (p, NULL);
+
+    p = sixtp_add_some_sub_parsers (
+        p, TRUE,
+        vendor_guid_string, restore_char_generator (sax_vendor_guid_end),
+        vendor_name_string, restore_char_generator (sax_vendor_name_end),
+        vendor_id_string, restore_char_generator (sax_vendor_id_end),
+        vendor_notes_string, restore_char_generator (sax_vendor_notes_end),
+        vendor_terms_string, restore_char_generator (sax_vendor_terms_end),
+        vendor_taxincluded_string, restore_char_generator (sax_vendor_taxincluded_end),
+        vendor_active_string, restore_char_generator (sax_vendor_active_end),
+        vendor_taxtable_string, restore_char_generator (sax_vendor_taxtable_end),
+        vendor_taxtableoverride_string, restore_char_generator (sax_vendor_taxtableoverride_end),
+        vendor_slots_string, sixtp_dom_parser_new_rooted (sax_vendor_slots_dom_end, NULL, NULL),
+        NULL, NULL);
+    g_return_val_if_fail (p, NULL);
+
+    sixtp_add_sub_parser (p, vendor_addr_string, sax_address_parser_new (sax_vendor_addr_start));
+
+    {
+        sixtp* cmdty = sax_commodity_ref_parser_new (sax_vendor_currency_end);
+        sixtp_add_sub_parser (p, vendor_currency_string, cmdty);
+        sixtp_add_sub_parser (p, "vendor:commodity", cmdty);
+    }
+
+    return p;
 }
 
 static gboolean
