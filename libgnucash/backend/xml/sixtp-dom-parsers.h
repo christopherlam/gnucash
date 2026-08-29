@@ -61,7 +61,6 @@ Account* dom_tree_to_account (xmlNodePtr node, QofBook* book);
 QofBook* dom_tree_to_book (xmlNodePtr node, QofBook* book);
 GNCLot*  dom_tree_to_lot (xmlNodePtr node, QofBook* book);
 Transaction* dom_tree_to_transaction (xmlNodePtr node, QofBook* book);
-GncBudget* dom_tree_to_budget (xmlNodePtr node, QofBook* book);
 
 struct dom_tree_handler
 {

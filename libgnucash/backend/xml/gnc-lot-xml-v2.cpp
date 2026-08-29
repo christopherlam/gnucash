@@ -113,44 +113,6 @@ static struct dom_tree_handler lot_handlers_v2[] =
     { NULL, 0, 0, 0 }
 };
 
-static gboolean
-gnc_lot_end_handler (gpointer data_for_children,
-                     GSList* data_from_children, GSList* sibling_data,
-                     gpointer parent_data, gpointer global_data,
-                     gpointer* result, const gchar* tag)
-{
-    GNCLot* lot;
-    xmlNodePtr tree = (xmlNodePtr)data_for_children;
-    gxpf_data* gdata = (gxpf_data*)global_data;
-    QofBook* book = static_cast<decltype (book)> (gdata->bookdata);
-
-    if (parent_data)
-    {
-        return TRUE;
-    }
-
-    /* OK.  For some messed up reason this is getting called again with a
-       NULL tag.  So we ignore those cases */
-    if (!tag)
-    {
-        return TRUE;
-    }
-
-    g_return_val_if_fail (tree, FALSE);
-
-    lot = dom_tree_to_lot (tree, book);
-    ENTER ("(lot=%p)", lot);
-    if (lot != NULL)
-    {
-        gdata->cb (tag, gdata->parsedata, lot);
-    }
-
-    xmlFreeNode (tree);
-
-    LEAVE ("");
-    return lot != NULL;
-}
-
 GNCLot*
 dom_tree_to_lot (xmlNodePtr node, QofBook* book)
 {
@@ -175,12 +137,6 @@ dom_tree_to_lot (xmlNodePtr node, QofBook* book)
 
     LEAVE ("");
     return lot;
-}
-
-sixtp*
-gnc_lot_sixtp_parser_create (void)
-{
-    return sixtp_dom_parser_new (gnc_lot_end_handler, NULL, NULL);
 }
 
 /* ================== END OF FILE ========================== */

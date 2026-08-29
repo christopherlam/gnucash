@@ -48,7 +48,6 @@ sixtp* gnc_commodity_sixtp_parser_create (void);
 sixtp* gnc_freqSpec_sixtp_parser_create (void);
 
 xmlNodePtr gnc_lot_dom_tree_create (GNCLot*);
-sixtp* gnc_lot_sixtp_parser_create (void);
 
 xmlNodePtr gnc_pricedb_dom_tree_create (GNCPriceDB* db);
 sixtp* gnc_pricedb_sixtp_parser_create (void);
