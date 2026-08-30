@@ -536,7 +536,16 @@ dom_tree_to_transaction (xmlNodePtr node, QofBook* book)
 
     successful = dom_tree_generic_parse (node, trn_dom_handlers, &pdata);
 
+    /* A transaction with no splits is implicitly destroyed by
+       xaccTransCommitEdit() itself (was_trans_emptied() in
+       Transaction.cpp); using trn afterward would be a use-after-free.
+       Check before committing, since the object may not exist to
+       check afterward. */
+    gboolean emptied = (xaccTransGetSplitList (trn) == NULL);
     xaccTransCommitEdit (trn);
+
+    if (emptied)
+        return NULL;
 
     if (!successful)
     {
@@ -971,8 +980,15 @@ sax_trn_end (gpointer data_for_children, GSList*, GSList*, gpointer, gpointer gl
     if (!tag)
         return TRUE;
 
+    /* A transaction with no splits (an empty trn:splits, or none at
+       all) is implicitly destroyed by xaccTransCommitEdit() itself
+       (was_trans_emptied() in Transaction.cpp); using pdata->trans
+       afterward would be a use-after-free. Check before committing,
+       since the object may not exist to check afterward. */
+    gboolean emptied = (xaccTransGetSplitList (pdata->trans) == NULL);
     xaccTransCommitEdit (pdata->trans);
-    gdata->cb (tag, gdata->parsedata, pdata->trans);
+    if (!emptied)
+        gdata->cb (tag, gdata->parsedata, pdata->trans);
     g_free (pdata);
     return TRUE;
 }
