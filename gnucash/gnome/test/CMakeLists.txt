@@ -40,6 +40,8 @@ set (test_assistant-stock-transaction_INCLUDE_DIRS
   ${CMAKE_BINARY_DIR}/common
   ${CMAKE_SOURCE_DIR}/libgnucash/engine
   ${CMAKE_SOURCE_DIR}/gnucash/register/ledger-core
+  ${CMAKE_SOURCE_DIR}/gnucash/register/register-core
+  ${CMAKE_SOURCE_DIR}/gnucash/register/register-gnome
   ${GNOME_UTILS_GUI_TEST_INCLUDE_DIRS}
   ${GNOME_UTILS_GUI_TEST_LIBS}
   ${GLIB2_INCLUDE_DIRS}
@@ -47,6 +49,7 @@ set (test_assistant-stock-transaction_INCLUDE_DIRS
 
 set (test_assistant-stock-transaction_LIBS
   gnc-engine
+  gnc-gnome
   gnc-gnome-utils
   gtest
 )
