@@ -990,6 +990,38 @@ gnc_tree_model_owner_event_handler (QofInstance *entity,
         gtk_tree_model_row_changed(GTK_TREE_MODEL(model), path, &iter);
         break;
 
+    case QOF_EVENT_DESTROY:
+    {
+        GncOwner *wrapper;
+
+        DEBUG("destroy owner %p (%s)", &owner, gncOwnerGetName(&owner));
+        if (!gnc_tree_model_owner_get_iter_from_owner (model, &owner, &iter))
+        {
+            LEAVE("can't generate iter, owner not in this model");
+            return;
+        }
+        path = gnc_tree_model_owner_get_path(GTK_TREE_MODEL(model), &iter);
+        if (!path)
+        {
+            DEBUG("can't generate path");
+            break;
+        }
+
+        /* Remove the (now stale) wrapper from our copy of the owner
+         * list, and invalidate all outstanding iterators, before
+         * telling the view the row is gone. Failing to do this leaves
+         * a dangling pointer to the just-destroyed customer/vendor/
+         * employee in the model, which crashes on the next redraw or
+         * selection change. */
+        wrapper = (GncOwner *) iter.user_data;
+        model->owner_list = g_list_remove (model->owner_list, wrapper);
+        gncOwnerFree (wrapper);
+        increment_stamp(model);
+
+        gtk_tree_model_row_deleted (GTK_TREE_MODEL(model), path);
+        break;
+    }
+
     default:
         LEAVE("unknown event type");
         return;
