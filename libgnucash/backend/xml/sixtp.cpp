@@ -671,6 +671,12 @@ sixtp_handle_catastrophe (sixtp_sax_data* sax_data)
             if (cresult->fail_handler)
             {
                 cresult->fail_handler (cresult);
+                /* fail_handler already freed cresult's data (or
+                   otherwise disposed of it); prevent the normal
+                   teardown below (sixtp_pop_and_destroy_frame ->
+                   sixtp_child_result_destroy) from also invoking
+                   cleanup_handler on it, which would double-free. */
+                cresult->should_cleanup = FALSE;
             }
         }
 
