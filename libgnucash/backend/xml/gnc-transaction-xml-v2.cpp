@@ -627,8 +627,10 @@ sax_spl_reconciled_state_end (gpointer, GSList* dfc, GSList*, gpointer parent_da
                               gpointer, gpointer*, const gchar*)
 {
     auto* pdata = static_cast<split_sax_pdata*> (parent_data);
-    /* txt[0] is '\0' for empty content; that's an accepted (if
-       degenerate) reconciled-state value, not an error. */
+    /* Matches the original: passes txt[0] straight through, including
+       '\0' for empty content, which xaccSplitSetReconcile() logs as
+       "Bad reconciled flag" and otherwise ignores (the split keeps its
+       prior reconciled state). */
     return sax_apply_chars (dfc, [pdata] (const char* txt) -> gboolean
     {
         xaccSplitSetReconcile (pdata->split, txt[0]);
