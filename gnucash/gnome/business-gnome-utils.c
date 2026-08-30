@@ -249,7 +249,7 @@ static GtkWidget * gnc_owner_new (GtkWidget *label, GtkWidget *hbox,
         return NULL;
 
     gnc_general_search_set_selected (GNC_GENERAL_SEARCH (edit),
-                                     owner->owner.undefined);
+                                     gncOwnerGetObject (owner));
     gtk_box_pack_start (GTK_BOX (hbox), edit, TRUE, TRUE, 0);
     if (label)
         gtk_label_set_text (GTK_LABEL (label), _(qof_object_get_type_label (type_name)));
@@ -295,7 +295,7 @@ void gnc_owner_get_owner (GtkWidget *widget, GncOwner *owner)
     {
         PWARN("Owner type mismatch: Instance %s, Owner %s",
               instance->e_type, qofOwnerGetType(owner));
-        owner->owner.undefined = instance;
+        gncOwnerInitUndefined (owner, instance);
     }
 }
 
@@ -309,7 +309,7 @@ void gnc_owner_set_owner (GtkWidget *widget, const GncOwner *owner)
      */
 
     gnc_general_search_set_selected (GNC_GENERAL_SEARCH (widget),
-                                     owner->owner.undefined);
+                                     gncOwnerGetObject (owner));
 }
 
 typedef struct _invoice_select_info
@@ -432,7 +432,7 @@ void gnc_invoice_set_owner (GtkWidget *widget, GncOwner *owner)
     isi = g_object_get_data(G_OBJECT(widget), "isi-state");
     g_assert(isi);
 
-    if (isi->owner.owner.undefined == owner->owner.undefined)
+    if (gncOwnerGetObject (&isi->owner) == gncOwnerGetObject (owner))
         return;
 
     gncOwnerCopy(owner, &isi->owner);

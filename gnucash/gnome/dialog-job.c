@@ -389,7 +389,7 @@ gnc_job_new_window (GtkWindow *parent, QofBook *bookp, GncOwner *owner, GncJob *
         jw->dialog_type = NEW_JOB;
 
         /* If we are passed a real owner, don't allow the user to change it */
-        if (owner->owner.undefined)
+        if (gncOwnerIsValid (owner))
         {
             jw->cust_edit = gnc_owner_edit_create (owner_label, owner_box,
                                                    bookp, owner);

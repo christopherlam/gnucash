@@ -397,11 +397,11 @@ void gnc_entry_ledger_load (GncEntryLedger* ledger, GList* entry_list)
                 switch (gncOwnerGetType (owner))
                 {
                 case GNC_OWNER_CUSTOMER:
-                    taxincluded_p = gncCustomerGetTaxIncluded (owner->owner.customer);
-                    discount = gncCustomerGetDiscount (owner->owner.customer);
+                    taxincluded_p = gncCustomerGetTaxIncluded (gncOwnerGetCustomer (owner));
+                    discount = gncCustomerGetDiscount (gncOwnerGetCustomer (owner));
                     break;
                 case GNC_OWNER_VENDOR:
-                    taxincluded_p = gncVendorGetTaxIncluded (owner->owner.vendor);
+                    taxincluded_p = gncVendorGetTaxIncluded (gncOwnerGetVendor (owner));
                     break;
                 default:
                     break;
@@ -435,16 +435,16 @@ void gnc_entry_ledger_load (GncEntryLedger* ledger, GList* entry_list)
                     table = gncTaxTableGetDefault (ledger->book,
                                                    GNC_OWNER_CUSTOMER);
 
-                    if (gncCustomerGetTaxTableOverride (owner->owner.customer))
-                        table = gncCustomerGetTaxTable (owner->owner.customer);
+                    if (gncCustomerGetTaxTableOverride (gncOwnerGetCustomer (owner)))
+                        table = gncCustomerGetTaxTable (gncOwnerGetCustomer (owner));
                     break;
 
                 case GNC_OWNER_VENDOR:
                     table = gncTaxTableGetDefault (ledger->book,
                                                    GNC_OWNER_VENDOR);
 
-                    if (gncVendorGetTaxTableOverride (owner->owner.vendor))
-                        table = gncVendorGetTaxTable (owner->owner.vendor);
+                    if (gncVendorGetTaxTableOverride (gncOwnerGetVendor (owner)))
+                        table = gncVendorGetTaxTable (gncOwnerGetVendor (owner));
                     break;
 
                 default:

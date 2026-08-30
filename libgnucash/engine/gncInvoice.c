@@ -1961,7 +1961,7 @@ gncInvoiceApplyPayment (const GncInvoice *invoice, Transaction *txn,
     if (!invoice || !gncInvoiceIsPosted (invoice) || !xfer_acc) return;
 
     owner = gncOwnerGetEndOwner (gncInvoiceGetOwner (invoice));
-    g_return_if_fail (owner->owner.undefined);
+    g_return_if_fail (gncOwnerIsValid (owner));
 
     /* Create a lot for this payment */
     payment_lot = gncOwnerCreatePaymentLotSecs (owner, &txn,

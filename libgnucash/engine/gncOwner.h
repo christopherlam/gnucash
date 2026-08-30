@@ -143,6 +143,12 @@ GncVendor * gncOwnerGetVendor (const GncOwner *owner);
  * to the employee object. Otherwise returns NULL. */
 GncEmployee * gncOwnerGetEmployee (const GncOwner *owner);
 
+/** Returns the underlying object pointer held by the owner, regardless
+ * of its type. Returns NULL if owner is NULL or of type GNC_OWNER_NONE.
+ * Useful for identity/selection checks that don't care which kind of
+ * owner this is (e.g. widget "selected object" plumbing). */
+gpointer gncOwnerGetObject (const GncOwner *owner);
+
 const char * gncOwnerGetID (const GncOwner *owner);
 const char * gncOwnerGetName (const GncOwner *owner);
 GncAddress * gncOwnerGetAddr (const GncOwner *owner);

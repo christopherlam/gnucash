@@ -48,11 +48,54 @@
 #include "Transaction.h"
 #include "engine-helpers.h"
 
+#include <variant>
+
 #define _GNC_MOD_NAME   GNC_ID_OWNER
 
 #define GNC_OWNER_ID    "gncOwner"
 
 static QofLogModule log_module = GNC_MOD_ENGINE;
+
+/* GncOwner's public struct (gncOwner.h) keeps a plain tagged union so that
+ * the many plain-C callers across the codebase (and SWIG) keep working
+ * unchanged. Internally here, though, dispatching on owner->type via
+ * std::variant/std::visit is safer than the hand-written switches this file
+ * used to have: a visitor that fails to handle one of the alternatives is a
+ * compile error, not a silently-missing case. to_variant() below is the
+ * bridge between the two representations. */
+namespace
+{
+using OwnerVariant = std::variant<std::monostate, gpointer, GncCustomer*,
+                                   GncJob*, GncVendor*, GncEmployee*>;
+
+OwnerVariant
+to_variant (const GncOwner *owner)
+{
+    if (!owner)
+        return {};
+    switch (owner->type)
+    {
+    case GNC_OWNER_NONE:
+        return {};
+    case GNC_OWNER_UNDEFINED:
+        return OwnerVariant{std::in_place_type<gpointer>, owner->owner.undefined};
+    case GNC_OWNER_CUSTOMER:
+        return OwnerVariant{std::in_place_type<GncCustomer*>, owner->owner.customer};
+    case GNC_OWNER_JOB:
+        return OwnerVariant{std::in_place_type<GncJob*>, owner->owner.job};
+    case GNC_OWNER_VENDOR:
+        return OwnerVariant{std::in_place_type<GncVendor*>, owner->owner.vendor};
+    case GNC_OWNER_EMPLOYEE:
+        return OwnerVariant{std::in_place_type<GncEmployee*>, owner->owner.employee};
+    }
+    return {};
+}
+
+/* Standard "overload set from lambdas" helper for std::visit. */
+template <typename... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template <typename... Ts> overloaded (Ts...) -> overloaded<Ts...>;
+
+} // anonymous namespace
 
 GncOwner * gncOwnerNew (void)
 {
@@ -72,94 +115,40 @@ void gncOwnerFree (GncOwner *owner)
 void gncOwnerBeginEdit (GncOwner *owner)
 {
     if (!owner) return;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE :
-    case GNC_OWNER_UNDEFINED :
-        break;
-    case GNC_OWNER_CUSTOMER :
-    {
-        gncCustomerBeginEdit(owner->owner.customer);
-        break;
-    }
-    case GNC_OWNER_JOB :
-    {
-        gncJobBeginEdit(owner->owner.job);
-        break;
-    }
-    case GNC_OWNER_VENDOR :
-    {
-        gncVendorBeginEdit(owner->owner.vendor);
-        break;
-    }
-    case GNC_OWNER_EMPLOYEE :
-    {
-        gncEmployeeBeginEdit(owner->owner.employee);
-        break;
-    }
-    }
+    std::visit (overloaded{
+        [](std::monostate) {},
+        [](gpointer) {},
+        [](GncCustomer *c) { gncCustomerBeginEdit (c); },
+        [](GncJob *j) { gncJobBeginEdit (j); },
+        [](GncVendor *v) { gncVendorBeginEdit (v); },
+        [](GncEmployee *e) { gncEmployeeBeginEdit (e); },
+    }, to_variant (owner));
 }
 
 void gncOwnerCommitEdit (GncOwner *owner)
 {
     if (!owner) return;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE :
-    case GNC_OWNER_UNDEFINED :
-        break;
-    case GNC_OWNER_CUSTOMER :
-    {
-        gncCustomerCommitEdit(owner->owner.customer);
-        break;
-    }
-    case GNC_OWNER_JOB :
-    {
-        gncJobCommitEdit(owner->owner.job);
-        break;
-    }
-    case GNC_OWNER_VENDOR :
-    {
-        gncVendorCommitEdit(owner->owner.vendor);
-        break;
-    }
-    case GNC_OWNER_EMPLOYEE :
-    {
-        gncEmployeeCommitEdit(owner->owner.employee);
-        break;
-    }
-    }
+    std::visit (overloaded{
+        [](std::monostate) {},
+        [](gpointer) {},
+        [](GncCustomer *c) { gncCustomerCommitEdit (c); },
+        [](GncJob *j) { gncJobCommitEdit (j); },
+        [](GncVendor *v) { gncVendorCommitEdit (v); },
+        [](GncEmployee *e) { gncEmployeeCommitEdit (e); },
+    }, to_variant (owner));
 }
 
 void gncOwnerDestroy (GncOwner *owner)
 {
     if (!owner) return;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE :
-    case GNC_OWNER_UNDEFINED :
-        break;
-    case GNC_OWNER_CUSTOMER :
-    {
-        gncCustomerDestroy(owner->owner.customer);
-        break;
-    }
-    case GNC_OWNER_JOB :
-    {
-        gncJobDestroy(owner->owner.job);
-        break;
-    }
-    case GNC_OWNER_VENDOR :
-    {
-        gncVendorDestroy(owner->owner.vendor);
-        break;
-    }
-    case GNC_OWNER_EMPLOYEE :
-    {
-        gncEmployeeDestroy(owner->owner.employee);
-        break;
-    }
-    }
+    std::visit (overloaded{
+        [](std::monostate) {},
+        [](gpointer) {},
+        [](GncCustomer *c) { gncCustomerDestroy (c); },
+        [](GncJob *j) { gncJobDestroy (j); },
+        [](GncVendor *v) { gncVendorDestroy (v); },
+        [](GncEmployee *e) { gncEmployeeDestroy (e); },
+    }, to_variant (owner));
 }
 
 void gncOwnerInitUndefined (GncOwner *owner, gpointer obj)
@@ -205,25 +194,14 @@ GncOwnerType gncOwnerGetType (const GncOwner *owner)
 
 const char * gncOwnerGetTypeString (const GncOwner *owner)
 {
-    GncOwnerType type = gncOwnerGetType(owner);
-    switch (type)
-    {
-    case GNC_OWNER_NONE:
-        return N_("None");
-    case GNC_OWNER_UNDEFINED:
-        return N_("Undefined");
-    case GNC_OWNER_CUSTOMER:
-        return N_("Customer");
-    case GNC_OWNER_JOB:
-        return N_("Job");
-    case GNC_OWNER_VENDOR:
-        return N_("Vendor");
-    case GNC_OWNER_EMPLOYEE:
-        return N_("Employee");
-    default:
-        PWARN ("Unknown owner type");
-        return NULL;
-    }
+    return std::visit (overloaded{
+        [](std::monostate) { return N_("None"); },
+        [](gpointer) { return N_("Undefined"); },
+        [](GncCustomer*) { return N_("Customer"); },
+        [](GncJob*) { return N_("Job"); },
+        [](GncVendor*) { return N_("Vendor"); },
+        [](GncEmployee*) { return N_("Employee"); },
+    }, to_variant (owner));
 }
 
 QofIdTypeConst
@@ -274,45 +252,17 @@ QofIdTypeConst gncOwnerTypeToQofIdType(GncOwnerType t)
 QofInstance*
 qofOwnerGetOwner (const GncOwner *owner)
 {
-    QofInstance *ent;
-
     if (!owner)
-    {
         return NULL;
-    }
-    ent = NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE :
-    {
-        break;
-    }
-    case GNC_OWNER_UNDEFINED :
-    {
-        break;
-    }
-    case GNC_OWNER_CUSTOMER :
-    {
-        ent = QOF_INSTANCE(owner->owner.customer);
-        break;
-    }
-    case GNC_OWNER_JOB :
-    {
-        ent = QOF_INSTANCE(owner->owner.job);
-        break;
-    }
-    case GNC_OWNER_VENDOR :
-    {
-        ent = QOF_INSTANCE(owner->owner.vendor);
-        break;
-    }
-    case GNC_OWNER_EMPLOYEE :
-    {
-        ent = QOF_INSTANCE(owner->owner.employee);
-        break;
-    }
-    }
-    return ent;
+
+    return std::visit (overloaded{
+        [](std::monostate) -> QofInstance* { return NULL; },
+        [](gpointer) -> QofInstance* { return NULL; },
+        [](GncCustomer *c) { return QOF_INSTANCE (c); },
+        [](GncJob *j) { return QOF_INSTANCE (j); },
+        [](GncVendor *v) { return QOF_INSTANCE (v); },
+        [](GncEmployee *e) { return QOF_INSTANCE (e); },
+    }, to_variant (owner));
 }
 
 void
@@ -394,6 +344,19 @@ GncEmployee * gncOwnerGetEmployee (const GncOwner *owner)
     return owner->owner.employee;
 }
 
+gpointer gncOwnerGetObject (const GncOwner *owner)
+{
+    if (!owner) return NULL;
+    return std::visit (overloaded{
+        [](std::monostate) -> gpointer { return NULL; },
+        [](gpointer p) -> gpointer { return p; },
+        [](GncCustomer *c) -> gpointer { return c; },
+        [](GncJob *j) -> gpointer { return j; },
+        [](GncVendor *v) -> gpointer { return v; },
+        [](GncEmployee *e) -> gpointer { return e; },
+    }, to_variant (owner));
+}
+
 void gncOwnerCopy (const GncOwner *src, GncOwner *dest)
 {
     if (!src || !dest) return;
@@ -419,146 +382,94 @@ int gncOwnerGCompareFunc (const GncOwner *a, const GncOwner *b)
 const char * gncOwnerGetID (const GncOwner *owner)
 {
     if (!owner) return NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerGetID (owner->owner.customer);
-    case GNC_OWNER_JOB:
-        return gncJobGetID (owner->owner.job);
-    case GNC_OWNER_VENDOR:
-        return gncVendorGetID (owner->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeGetID (owner->owner.employee);
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> const char* { return NULL; },
+        [](gpointer) -> const char* { return NULL; },
+        [](GncCustomer *c) { return gncCustomerGetID (c); },
+        [](GncJob *j) { return gncJobGetID (j); },
+        [](GncVendor *v) { return gncVendorGetID (v); },
+        [](GncEmployee *e) { return gncEmployeeGetID (e); },
+    }, to_variant (owner));
 }
 
 const char * gncOwnerGetName (const GncOwner *owner)
 {
     if (!owner) return NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerGetName (owner->owner.customer);
-    case GNC_OWNER_JOB:
-        return gncJobGetName (owner->owner.job);
-    case GNC_OWNER_VENDOR:
-        return gncVendorGetName (owner->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeGetName (owner->owner.employee);
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> const char* { return NULL; },
+        [](gpointer) -> const char* { return NULL; },
+        [](GncCustomer *c) { return gncCustomerGetName (c); },
+        [](GncJob *j) { return gncJobGetName (j); },
+        [](GncVendor *v) { return gncVendorGetName (v); },
+        [](GncEmployee *e) { return gncEmployeeGetName (e); },
+    }, to_variant (owner));
 }
 
 GncAddress * gncOwnerGetAddr (const GncOwner *owner)
 {
     if (!owner) return NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    case GNC_OWNER_JOB:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerGetAddr (owner->owner.customer);
-    case GNC_OWNER_VENDOR:
-        return gncVendorGetAddr (owner->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeGetAddr (owner->owner.employee);
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> GncAddress* { return NULL; },
+        [](gpointer) -> GncAddress* { return NULL; },
+        [](GncCustomer *c) { return gncCustomerGetAddr (c); },
+        [](GncJob*) -> GncAddress* { return NULL; },
+        [](GncVendor *v) { return gncVendorGetAddr (v); },
+        [](GncEmployee *e) { return gncEmployeeGetAddr (e); },
+    }, to_variant (owner));
 }
 
 gnc_commodity * gncOwnerGetCurrency (const GncOwner *owner)
 {
     if (!owner) return NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerGetCurrency (owner->owner.customer);
-    case GNC_OWNER_VENDOR:
-        return gncVendorGetCurrency (owner->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeGetCurrency (owner->owner.employee);
-    case GNC_OWNER_JOB:
-        return gncOwnerGetCurrency (gncJobGetOwner (owner->owner.job));
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> gnc_commodity* { return NULL; },
+        [](gpointer) -> gnc_commodity* { return NULL; },
+        [](GncCustomer *c) { return gncCustomerGetCurrency (c); },
+        [](GncJob *j) { return gncOwnerGetCurrency (gncJobGetOwner (j)); },
+        [](GncVendor *v) { return gncVendorGetCurrency (v); },
+        [](GncEmployee *e) { return gncEmployeeGetCurrency (e); },
+    }, to_variant (owner));
 }
 
 gboolean gncOwnerGetActive (const GncOwner *owner)
 {
     if (!owner) return FALSE;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return FALSE;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerGetActive (owner->owner.customer);
-    case GNC_OWNER_VENDOR:
-        return gncVendorGetActive (owner->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeGetActive (owner->owner.employee);
-    case GNC_OWNER_JOB:
-        return gncJobGetActive (owner->owner.job);
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> gboolean { return FALSE; },
+        [](gpointer) -> gboolean { return FALSE; },
+        [](GncCustomer *c) { return gncCustomerGetActive (c); },
+        [](GncJob *j) { return gncJobGetActive (j); },
+        [](GncVendor *v) { return gncVendorGetActive (v); },
+        [](GncEmployee *e) { return gncEmployeeGetActive (e); },
+    }, to_variant (owner));
 }
 
 const GncGUID * gncOwnerGetGUID (const GncOwner *owner)
 {
     if (!owner) return NULL;
 
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-        return qof_instance_get_guid (QOF_INSTANCE(owner->owner.customer));
-    case GNC_OWNER_JOB:
-        return qof_instance_get_guid (QOF_INSTANCE(owner->owner.job));
-    case GNC_OWNER_VENDOR:
-        return qof_instance_get_guid (QOF_INSTANCE(owner->owner.vendor));
-    case GNC_OWNER_EMPLOYEE:
-        return qof_instance_get_guid (QOF_INSTANCE(owner->owner.employee));
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> const GncGUID* { return NULL; },
+        [](gpointer) -> const GncGUID* { return NULL; },
+        [](GncCustomer *c) { return qof_instance_get_guid (QOF_INSTANCE (c)); },
+        [](GncJob *j) { return qof_instance_get_guid (QOF_INSTANCE (j)); },
+        [](GncVendor *v) { return qof_instance_get_guid (QOF_INSTANCE (v)); },
+        [](GncEmployee *e) { return qof_instance_get_guid (QOF_INSTANCE (e)); },
+    }, to_variant (owner));
 }
 
 void
 gncOwnerSetActive (const GncOwner *owner, gboolean active)
 {
     if (!owner) return;
-    switch (owner->type)
-    {
-    case GNC_OWNER_CUSTOMER:
-        gncCustomerSetActive (owner->owner.customer, active);
-        break;
-    case GNC_OWNER_VENDOR:
-        gncVendorSetActive (owner->owner.vendor, active);
-        break;
-    case GNC_OWNER_EMPLOYEE:
-        gncEmployeeSetActive (owner->owner.employee, active);
-        break;
-    case GNC_OWNER_JOB:
-        gncJobSetActive (owner->owner.job, active);
-        break;
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        break;
-    }
+    std::visit (overloaded{
+        [](std::monostate) {},
+        [](gpointer) {},
+        [active](GncCustomer *c) { gncCustomerSetActive (c, active); },
+        [active](GncJob *j) { gncJobSetActive (j, active); },
+        [active](GncVendor *v) { gncVendorSetActive (v, active); },
+        [active](GncEmployee *e) { gncEmployeeSetActive (e, active); },
+    }, to_variant (owner));
 }
 
 GncGUID gncOwnerRetGUID (GncOwner *owner)
@@ -572,19 +483,14 @@ GncGUID gncOwnerRetGUID (GncOwner *owner)
 const GncOwner * gncOwnerGetEndOwner (const GncOwner *owner)
 {
     if (!owner) return NULL;
-    switch (owner->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return NULL;
-    case GNC_OWNER_CUSTOMER:
-    case GNC_OWNER_VENDOR:
-    case GNC_OWNER_EMPLOYEE:
-        return owner;
-    case GNC_OWNER_JOB:
-        return gncJobGetOwner (owner->owner.job);
-    }
+    return std::visit (overloaded{
+        [](std::monostate) -> const GncOwner* { return NULL; },
+        [](gpointer) -> const GncOwner* { return NULL; },
+        [owner](GncCustomer*) -> const GncOwner* { return owner; },
+        [owner](GncVendor*) -> const GncOwner* { return owner; },
+        [owner](GncEmployee*) -> const GncOwner* { return owner; },
+        [](GncJob *j) -> const GncOwner* { return gncJobGetOwner (j); },
+    }, to_variant (owner));
 }
 
 int gncOwnerCompare (const GncOwner *a, const GncOwner *b)
@@ -596,21 +502,16 @@ int gncOwnerCompare (const GncOwner *a, const GncOwner *b)
     if (a->type != b->type)
         return (a->type - b->type);
 
-    switch (a->type)
-    {
-    case GNC_OWNER_NONE:
-    case GNC_OWNER_UNDEFINED:
-    default:
-        return 0;
-    case GNC_OWNER_CUSTOMER:
-        return gncCustomerCompare (a->owner.customer, b->owner.customer);
-    case GNC_OWNER_VENDOR:
-        return gncVendorCompare (a->owner.vendor, b->owner.vendor);
-    case GNC_OWNER_EMPLOYEE:
-        return gncEmployeeCompare (a->owner.employee, b->owner.employee);
-    case GNC_OWNER_JOB:
-        return gncJobCompare (a->owner.job, b->owner.job);
-    }
+    /* Types match, so `b`'s variant necessarily holds the same
+     * alternative as `a`'s -- std::get is safe here. */
+    return std::visit (overloaded{
+        [](std::monostate) { return 0; },
+        [](gpointer) { return 0; },
+        [&b](GncCustomer *ac) { return gncCustomerCompare (ac, std::get<GncCustomer*> (to_variant (b))); },
+        [&b](GncJob *aj) { return gncJobCompare (aj, std::get<GncJob*> (to_variant (b))); },
+        [&b](GncVendor *av) { return gncVendorCompare (av, std::get<GncVendor*> (to_variant (b))); },
+        [&b](GncEmployee *ae) { return gncEmployeeCompare (ae, std::get<GncEmployee*> (to_variant (b))); },
+    }, to_variant (a));
 }
 
 const GncGUID * gncOwnerGetEndGUID (const GncOwner *owner)
@@ -705,7 +606,7 @@ gboolean gncOwnerIsValid (const GncOwner *owner)
 gboolean
 gncOwnerLotMatchOwnerFunc (GNCLot *lot, gpointer user_data)
 {
-    const GncOwner *req_owner = user_data;
+    const GncOwner *req_owner = static_cast<const GncOwner*> (user_data);
     GncOwner lot_owner;
     const GncOwner *end_owner;
     GncInvoice *invoice = gncInvoiceGetInvoiceFromLot (lot);
@@ -905,7 +806,7 @@ Split *gncOwnerFindOffsettingSplit (GNCLot *lot, gnc_numeric target_amount)
 
     for (ls_iter = gnc_lot_get_split_list (lot); ls_iter; ls_iter = ls_iter->next)
     {
-        Split *split = ls_iter->data;
+        Split *split = static_cast<Split*> (ls_iter->data);
 
         if (!split)
             continue;
@@ -1024,7 +925,7 @@ gncOwnerSetLotLinkMemo (Transaction *ll_txn)
     // Find all splits in the lot link transaction that are also in a document lot
     for (lts_iter = xaccTransGetSplitList (ll_txn); lts_iter; lts_iter = lts_iter->next)
     {
-        Split *split = lts_iter->data;
+        Split *split = static_cast<Split*> (lts_iter->data);
         GNCLot *lot;
         GncInvoice *invoice;
         gchar *title;
@@ -1064,8 +965,9 @@ gncOwnerSetLotLinkMemo (Transaction *ll_txn)
     // Update the memos of all the splits we found previously (if needed)
     for (siter = splits; siter; siter = siter->next)
     {
-        if (g_strcmp0 (xaccSplitGetMemo (siter->data), new_memo) != 0)
-            xaccSplitSetMemo (siter->data, new_memo);
+        Split *memo_split = static_cast<Split*> (siter->data);
+        if (g_strcmp0 (xaccSplitGetMemo (memo_split), new_memo) != 0)
+            xaccSplitSetMemo (memo_split, new_memo);
     }
 
     g_list_free (splits);
@@ -1091,7 +993,7 @@ get_ll_transaction_from_lot (GNCLot *lot)
      */
     for (ls_iter = gnc_lot_get_split_list (lot); ls_iter; ls_iter = ls_iter->next)
     {
-        Split *ls = ls_iter->data;
+        Split *ls = static_cast<Split*> (ls_iter->data);
         Transaction *ll_txn = xaccSplitGetParent (ls);
         SplitList *ts_iter;
 
@@ -1100,7 +1002,7 @@ get_ll_transaction_from_lot (GNCLot *lot)
 
         for (ts_iter = xaccTransGetSplitList (ll_txn); ts_iter; ts_iter = ts_iter->next)
         {
-            Split *ts = ts_iter->data;
+            Split *ts = static_cast<Split*> (ts_iter->data);
             GNCLot *tslot = xaccSplitGetLot (ts);
 
             if (!tslot)
@@ -1271,7 +1173,7 @@ void gncOwnerAutoApplyPaymentsWithLots (const GncOwner *owner, GList *lots)
 
     for (left_iter = lots; left_iter; left_iter = left_iter->next)
     {
-        GNCLot *left_lot = left_iter->data;
+        GNCLot *left_lot = static_cast<GNCLot*> (left_iter->data);
         gnc_numeric left_lot_bal;
         gboolean left_lot_has_doc;
         gboolean left_modified = FALSE;
@@ -1305,7 +1207,7 @@ void gncOwnerAutoApplyPaymentsWithLots (const GncOwner *owner, GList *lots)
          */
         for (right_iter = left_iter->next; right_iter; right_iter = right_iter->next)
         {
-            GNCLot *right_lot = right_iter->data;
+            GNCLot *right_lot = static_cast<GNCLot*> (right_iter->data);
             gnc_numeric right_lot_bal;
             gboolean right_lot_has_doc;
 
@@ -1502,7 +1404,7 @@ gncOwnerGetBalanceInCurrency (const GncOwner *owner,
         /* For each account */
         for (acct_node = acct_list; acct_node; acct_node = acct_node->next)
         {
-            Account *account = acct_node->data;
+            Account *account = static_cast<Account*> (acct_node->data);
             GList *lot_list = NULL, *lot_node;
 
             /* Check if this account can have lots for the owner, otherwise skip to next */
@@ -1520,7 +1422,7 @@ gncOwnerGetBalanceInCurrency (const GncOwner *owner,
             /* For each lot */
             for (lot_node = lot_list; lot_node; lot_node = lot_node->next)
             {
-                GNCLot *lot = lot_node->data;
+                GNCLot *lot = static_cast<GNCLot*> (lot_node->data);
                 gnc_numeric lot_balance = gnc_lot_get_balance (lot);
                 GncInvoice *invoice = gncInvoiceGetInvoiceFromLot(lot);
                 if (invoice)
