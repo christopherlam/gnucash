@@ -278,7 +278,16 @@ sax_billterm_slots_dom_end (gpointer data_for_children, GSList*, GSList*,
    either type); their own start handler enforces that the same way the
    original's g_return_val_if_fail(gncBillTermGetType(term) == 0, ...)
    did, then sets the type immediately so it's in place before any of
-   the wrapper's own children run. */
+   the wrapper's own children run.
+
+   *data_for_children is set unconditionally, even when the guard
+   below fails: unlike the original DOM code (which only walked the
+   already-fully-materialized subtree if the guard passed), sixtp
+   dispatches this element's children regardless of what this start
+   handler returns, and each child's leaf handler dereferences its own
+   parent_data unconditionally. Leaving it null on the failure path
+   would crash the first such child (a billterm with both billterm:days
+   and billterm:proximo present is exactly this case). */
 
 static gboolean
 sax_billterm_days_start (GSList*, gpointer parent_data, gpointer,
@@ -286,9 +295,9 @@ sax_billterm_days_start (GSList*, gpointer parent_data, gpointer,
                          const gchar*, gchar**)
 {
     auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    *data_for_children = pdata;
     if (gncBillTermGetType (pdata->term) != 0) return FALSE;
     gncBillTermSetType (pdata->term, GNC_TERM_TYPE_DAYS);
-    *data_for_children = pdata;
     return TRUE;
 }
 
@@ -298,9 +307,9 @@ sax_billterm_prox_start (GSList*, gpointer parent_data, gpointer,
                          const gchar*, gchar**)
 {
     auto* pdata = static_cast<billterm_sax_pdata*> (parent_data);
+    *data_for_children = pdata;
     if (gncBillTermGetType (pdata->term) != 0) return FALSE;
     gncBillTermSetType (pdata->term, GNC_TERM_TYPE_PROXIMO);
-    *data_for_children = pdata;
     return TRUE;
 }
 
