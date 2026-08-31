@@ -281,12 +281,12 @@ extract_base_name(URLType type, const gchar* path)
         !g_strcmp0 (type, URL_TYPE_SECURE) ||
         !g_strcmp0 (type, URL_TYPE_FTP))
     {
-        if (auto m = ctre::match<re1>(path))
+        if (auto m = ctre::search<re1>(path))
             basename = m.get<0>().to_string();
     }
     else
     {
-        if (auto m = ctre::match<re2>(path))
+        if (auto m = ctre::search<re2>(path))
             basename = m.get<0>().to_string();
     }
 
