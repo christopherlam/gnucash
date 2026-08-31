@@ -65,9 +65,9 @@ consistent about them:
   `std::format`, three-way comparison, modules) until the project's minimum standard actually
   moves — this needs a build-system decision, not a per-file one.
   - **Proposed discussion point**: is it time to evaluate C++20? Distros GnuCash targets
-    (current Debian/Fedora/openSUSE stable + the Windows/macOS CI toolchains) mostly ship
-    compilers capable of it now. If the answer is "not yet," say so here explicitly so
-    contributors stop proposing it file-by-file.
+    (upcoming/future Debian/Fedora/openSUSE releases + the Windows/macOS CI toolchains) will
+    mostly ship compilers capable of it soon, even where current stable releases don't yet. If
+    the answer is "not yet," say so here explicitly so contributors stop proposing it file-by-file.
 - **Boost 1.67+** is already a hard dependency (`find_package(Boost 1.67.0 REQUIRED)`), with
   `date_time`, `filesystem`, `locale`, `program_options`, `regex`, `system` (and newer additions:
   `atomic`, `charconv`, `chrono`, `container`, `thread` for Boost ≥ 1.89). This means Boost is not
