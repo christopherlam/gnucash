@@ -50,6 +50,7 @@
 #include "gnc-recurrence-sql.h"
 #include "gnc-schedxaction-sql.h"
 #include "gnc-slots-sql.h"
+#include <Transaction.hpp>
 #include "gnc-transaction-sql.h"
 
 #include "gnc-bill-term-sql.h"
@@ -414,11 +415,11 @@ write_tx (Transaction* tx, gpointer data)
 
     s->commit (QOF_INSTANCE (tx));
     auto splitbe = s->be->get_object_backend(GNC_ID_SPLIT);
-    for (auto split_node = xaccTransGetSplitList (tx);
-         split_node != nullptr && s->is_ok;
-         split_node = g_list_next (split_node))
+    for (auto split : xaccTransGetSplits (tx))
     {
-        s->is_ok = splitbe->commit(s->be, QOF_INSTANCE(split_node->data));
+        if (!s->is_ok)
+            break;
+        s->is_ok = splitbe->commit(s->be, QOF_INSTANCE(split));
     }
     s->be->update_progress (101.0);
     return (s->is_ok ? 0 : 1);

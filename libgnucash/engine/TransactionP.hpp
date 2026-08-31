@@ -48,9 +48,22 @@
 #include <time.h>
 #include <glib.h>
 
+#include <memory>
+#include <string>
+
 #include "gnc-engine.h"   /* for typedefs */
+#include "Account.hpp"    /* for SplitsVec */
 #include "SplitP.hpp"
 #include "qof.h"
+
+/* Deleter for the rollback copy a Transaction holds while being edited, so
+ * that ownership of that copy can be expressed with a unique_ptr. */
+struct TransDeleter
+{
+    void operator() (Transaction *trans) const;
+};
+
+using TransPtr = std::unique_ptr<Transaction, TransDeleter>;
 
 
 /** STRUCTS *********************************************************/
@@ -82,12 +95,12 @@ struct transaction_s
      * It is intended to store a short id number, typically the check number,
      * deposit number, invoice number or other tracking number.
      */
-    const char *num;
+    std::string num;
 
     /* The description field is an arbitrary user-assigned value.
      * It is meant to be a short descriptive phrase.
      */
-    const char *description;
+    std::string description;
 
     /* The common_currency field is the balancing common currency for
      * all the splits in the transaction.  Alternate, better(?) name:
@@ -95,7 +108,7 @@ struct transaction_s
      * splits can be valued.  */
     gnc_commodity *common_currency;
 
-    GList * splits; /* list of splits */
+    SplitsVec splits; /* the transaction's splits, in order */
 
     /* marker is used to track the progress of transaction traversals.
      * 0 is never a legitimate marker value, so we can tell is we hit
@@ -109,13 +122,16 @@ struct transaction_s
      * before editing was started.  This orig copy is used to rollback
      * any changes made if/when the edit is abandoned.
      */
-    Transaction *orig;
+    TransPtr orig;
 
     /* A flag to indicate when a transaction represents an invoice, a payment,
      * or a link between the two.
      */
     char txn_type;
 
+    /* Set by xaccFreeTransaction so that a double free can be diagnosed
+     * rather than acted upon. */
+    bool freed;
 };
 
 struct _TransactionClass

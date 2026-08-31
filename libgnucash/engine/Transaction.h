@@ -395,10 +395,16 @@ int xaccTransGetSplitIndex(const Transaction *trans, const Split *split);
 
 /** The xaccTransGetSplitList() method returns a GList of the splits
     in a transaction.
+
+    The transaction stores its splits in a std::vector, so this list is built
+    on demand for callers that cannot use the C++ API; C++ callers should use
+    xaccTransGetSplits() instead, which hands back the transaction's own
+    storage and allocates nothing.
+
     @param trans The transaction
-    @return The list of splits. This list must NOT be modified.  Do *NOT* free
-    this list when you are done with it. */
-/*@ dependent @*/
+    @return A newly allocated list of splits, which the caller must free with
+    g_list_free() when done. The splits themselves remain owned by the
+    transaction. */
 SplitList *   xaccTransGetSplitList (const Transaction *trans);
 
 /** The xaccTransGetPaymentAcctSplitList() method returns a GList of the splits

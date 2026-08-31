@@ -28,6 +28,7 @@
 #include "AccountP.hpp"
 #include "Transaction.h"
 #include "TransactionP.hpp"
+#include "Transaction.hpp"
 #include "gnc-lot.h"
 #include "gnc-lot-p.h"
 
@@ -134,16 +135,12 @@ split_to_dom_tree (const gchar* tag, Split* spl)
 static void
 add_trans_splits (xmlNodePtr node, Transaction* trn)
 {
-    GList* n;
     xmlNodePtr toaddto;
 
     toaddto = xmlNewChild (node, NULL, BAD_CAST "trn:splits", NULL);
 
-    for (n = xaccTransGetSplitList (trn); n; n = n->next)
-    {
-        Split* s = static_cast<decltype (s)> (n->data);
+    for (auto s : xaccTransGetSplits (trn))
         xmlAddChild (toaddto, split_to_dom_tree ("trn:split", s));
-    }
 }
 
 xmlNodePtr

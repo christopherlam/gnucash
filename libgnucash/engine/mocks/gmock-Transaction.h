@@ -9,6 +9,7 @@
 
 #include <Transaction.h>
 #include <TransactionP.hpp>
+#include <Transaction.hpp>
 
 #include "gmock-gobject.h"
 
@@ -52,7 +53,7 @@ public:
     MOCK_METHOD0(begin_edit, void());
     MOCK_METHOD0(commit_edit, void());
     MOCK_CONST_METHOD1(get_split, Split *(int));
-    MOCK_CONST_METHOD0(get_split_list, GList*());
+    MOCK_CONST_METHOD0(get_splits, const SplitsVec&());
     MOCK_CONST_METHOD1(find_split_by_account, Split *(const Account*));
     MOCK_CONST_METHOD0(get_date, time64());
     MOCK_METHOD1(set_date_posted_secs_normalized, void(time64));

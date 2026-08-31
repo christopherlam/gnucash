@@ -39,6 +39,7 @@
 #include "import-utilities.h"
 #include "Account.h"
 #include "Account.hpp"
+#include <Transaction.hpp>
 #include "Query.h"
 #include "gnc-engine.h"
 #include "engine-helpers.h"
@@ -485,9 +486,9 @@ TransactionGetTokens(GNCImportTransInfo *info)
     tokens = g_list_prepend(tokens, g_strdup(local_day_of_week));
 
     /* make tokens from the memo of each split of this transaction */
-    for (GList *node=xaccTransGetSplitList (transaction); node; node=node->next)
+    for (auto split : xaccTransGetSplits (transaction))
     {
-        text = xaccSplitGetMemo(static_cast<Split*>(node->data));
+        text = xaccSplitGetMemo (split);
         tokens = tokenize_string(tokens, text);
     }
 

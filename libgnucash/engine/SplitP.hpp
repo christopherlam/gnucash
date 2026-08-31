@@ -48,6 +48,9 @@
 #include <time.h>
 #include <glib.h>
 
+#include <optional>
+#include <string>
+
 #include "gnc-engine.h"   /* for typedefs */
 #include "qof.h"
 
@@ -68,6 +71,14 @@
 #define GAINS_STATUS_VDIRTY    (GAINS_STATUS_VALU_DIRTY)
 #define GAINS_STATUS_A_VDIRTY  (GAINS_STATUS_AMNT_DIRTY|GAINS_STATUS_VALU_DIRTY|GAINS_STATUS_LOT_DIRTY)
 
+/* The kind of split: an ordinary one, or one recording a stock split.
+ * Stored lazily: an empty optional means "not yet read from the slots". */
+enum class SplitType
+{
+    normal,
+    stock_split,
+};
+
 struct split_s
 {
     QofInstance inst;
@@ -83,7 +94,7 @@ struct split_s
      * It is intended to hold a short (zero to forty character) string
      * that is displayed by the GUI along with this split.
      */
-    const char  *memo;
+    std::string memo;
 
     /* The action field is an arbitrary user-assigned value.
      * It is meant to be a very short (one to ten character) string that
@@ -91,7 +102,7 @@ struct split_s
      * Withdraw, Deposit, ATM, Check, etc. The idea is that this field
      * can be used to create custom reports or graphs of data.
      */
-    const char  *action;       /* Buy, Sell, Div, etc.                      */
+    std::string action;        /* Buy, Sell, Div, etc.                      */
 
     time64 date_reconciled;    /* date split was reconciled                 */
     char   reconciled;         /* The reconciled field                      */
@@ -115,7 +126,7 @@ struct split_s
     gnc_numeric  value;
     gnc_numeric  amount;
 
-    const char *split_type;
+    std::optional<SplitType> split_type;
 
     /* -------------------------------------------------------------- */
     /* Below follow some 'temporary' fields */
@@ -131,6 +142,10 @@ struct split_s
 
     /* The stock-split adjusted amount */
     gnc_numeric  adjusted_amount;
+
+    /* Set by xaccFreeSplit so that a double free can be diagnosed rather
+     * than acted upon. */
+    bool freed;
 };
 
 struct _SplitClass

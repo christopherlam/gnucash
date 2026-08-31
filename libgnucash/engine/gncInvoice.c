@@ -1801,6 +1801,7 @@ gncInvoiceUnpost (GncInvoice *invoice, gboolean reset_tax_tables)
 
             lot_list = g_list_prepend (lot_list, other_lot);
         }
+        g_list_free (other_split_list);
         /* Maintain original split order */
         lot_list = g_list_reverse (lot_list);
 

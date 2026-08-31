@@ -446,6 +446,7 @@ get_check_splits_amount(PrintCheckDialog *pcd)
         }
         node = node->next;
     }
+    g_list_free (s_list);
     return amount;
 }
 
@@ -484,6 +485,7 @@ get_check_splits_memo(PrintCheckDialog *pcd)
         }
         node = node->next;
     }
+    g_list_free (s_list);
     return memo;
 }
 
@@ -524,6 +526,7 @@ get_check_splits_account(PrintCheckDialog *pcd)
         }
         node = node->next;
     }
+    g_list_free (s_list);
     return account;
 }
 //@}

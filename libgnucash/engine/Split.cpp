@@ -49,6 +49,7 @@
 #include "Split.h"
 #include "AccountP.hpp"
 #include "Account.hpp"
+#include "Transaction.hpp"
 #include "Scrub.h"
 #include "TransactionP.hpp"
 #include "TransLog.h"
@@ -103,6 +104,12 @@ static const char * split_type_normal = "normal";
 static const char * split_type_stock_split = "stock-split";
 static const char * split_online_id = "online_id";
 
+static const char *
+split_type_name (SplitType type)
+{
+    return type == SplitType::stock_split ? split_type_stock_split : split_type_normal;
+}
+
 /* GObject Initialization */
 G_DEFINE_TYPE(Split, gnc_split, QOF_TYPE_INSTANCE)
 
@@ -115,8 +122,13 @@ gnc_split_init(Split* split)
     split->parent      = nullptr;
     split->lot         = nullptr;
 
-    split->action      = CACHE_INSERT("");
-    split->memo        = CACHE_INSERT("");
+    /* The strings are non-trivial C++ types living in a GObject-allocated
+     * block: construct them in place here and destroy them in finalize. */
+    new (&split->memo) std::string ();
+    new (&split->action) std::string ();
+    new (&split->split_type) std::optional<SplitType> ();
+
+    split->freed       = false;
     split->reconciled  = NREC;
     split->amount      = gnc_numeric_zero();
     split->value       = gnc_numeric_zero();
@@ -129,7 +141,6 @@ gnc_split_init(Split* split)
     split->noclosing_balance   = gnc_numeric_zero();
 
     split->adjusted_amount     = gnc_numeric_zero();
-    split->split_type          = nullptr;
 
     split->gains = GAINS_STATUS_UNKNOWN;
     split->gains_split = nullptr;
@@ -144,6 +155,11 @@ gnc_split_dispose(GObject *splitp)
 static void
 gnc_split_finalize(GObject* splitp)
 {
+    auto split{GNC_SPLIT (splitp)};
+    /* Counterpart to the placement new in gnc_split_init. */
+    split->memo.~basic_string();
+    split->action.~basic_string();
+    split->split_type.~optional();
     G_OBJECT_CLASS(gnc_split_parent_class)->finalize(splitp);
 }
 /* Note that g_value_set_object() refs the object, as does
@@ -167,10 +183,10 @@ gnc_split_get_property(GObject         *object,
     switch (prop_id)
     {
         case PROP_ACTION:
-            g_value_set_string(value, split->action);
+            g_value_set_string(value, split->action.c_str());
             break;
         case PROP_MEMO:
-            g_value_set_string(value, split->memo);
+            g_value_set_string(value, split->memo.c_str());
             break;
         case PROP_VALUE:
             g_value_set_boxed(value, &split->value);
@@ -510,8 +526,8 @@ xaccSplitReinit(Split * split)
     split->parent      = nullptr;
     split->lot         = nullptr;
 
-    CACHE_REPLACE(split->action, "");
-    CACHE_REPLACE(split->memo, "");
+    split->action.clear();
+    split->memo.clear();
     split->reconciled  = NREC;
     split->amount      = gnc_numeric_zero();
     split->value       = gnc_numeric_zero();
@@ -524,7 +540,7 @@ xaccSplitReinit(Split * split)
     split->noclosing_balance   = gnc_numeric_zero();
 
     split->adjusted_amount     = gnc_numeric_zero();
-    split->split_type          = nullptr;
+    split->split_type.reset();
 
     qof_instance_set_idata(split, 0);
 
@@ -574,8 +590,8 @@ xaccDupeSplit (const Split *s)
     split->orig_acc = s->orig_acc;
     split->lot = s->lot;
 
-    CACHE_REPLACE(split->memo, s->memo);
-    CACHE_REPLACE(split->action, s->action);
+    split->memo = s->memo;
+    split->action = s->action;
 
     qof_instance_copy_kvp (QOF_INSTANCE (split), QOF_INSTANCE (s));
 
@@ -600,8 +616,8 @@ xaccSplitCloneNoKvp (const Split *s)
     Split *split = GNC_SPLIT(g_object_new (GNC_TYPE_SPLIT, nullptr));
 
     split->parent              = nullptr;
-    split->memo                = CACHE_INSERT(s->memo);
-    split->action              = CACHE_INSERT(s->action);
+    split->memo                = s->memo;
+    split->action              = s->action;
     split->reconciled          = s->reconciled;
     split->date_reconciled     = s->date_reconciled;
     split->value               = s->value;
@@ -685,8 +701,8 @@ xaccSplitDump (const Split *split, const char *tag)
     printf("    Lot:      %p\n", split->lot);
     printf("    Parent:   %p\n", split->parent);
     printf("    Gains:    %p\n", split->gains_split);
-    printf("    Memo:     %s\n", split->memo ? split->memo : "(null)");
-    printf("    Action:   %s\n", split->action ? split->action : "(null)");
+    printf("    Memo:     %s\n", split->memo.c_str());
+    printf("    Action:   %s\n", split->action.c_str());
     printf("    KVP Data: %s\n", qof_instance_kvp_as_string (QOF_INSTANCE (split)));
     printf("    Recncld:  %c (date %s)\n", split->reconciled, datebuff);
 
@@ -698,7 +714,8 @@ xaccSplitDump (const Split *split, const char *tag)
            gnc_numeric_to_string(split->reconciled_balance));
     printf("    NoClose:  %s\n", gnc_numeric_to_string(split->noclosing_balance));
     printf("    AdjAmt:   %s\n", gnc_numeric_to_string(split->adjusted_amount));
-    printf("    Type:     %s\n", split->split_type ? split->split_type : "(null)");
+    printf("    Type:     %s\n", split->split_type ?
+           split_type_name (*split->split_type) : "(unset)");
     printf("    idata:    %x\n", qof_instance_get_idata(split));
 }
 #endif
@@ -717,13 +734,12 @@ xaccFreeSplit (Split *split)
     if (!split) return;
 
     /* Debug double-free's */
-    if (((char *) 1) == split->memo)
+    if (split->freed)
     {
         PERR ("double-free %p", split);
         return;
     }
-    CACHE_REMOVE(split->memo);
-    CACHE_REMOVE(split->action);
+    split->freed = true;
 
     if (split->inst.e_type) /* Don't do this for dupe splits. */
     {
@@ -749,8 +765,8 @@ xaccFreeSplit (Split *split)
     }
 
     /* Just in case someone looks up freed memory ... */
-    split->memo        = (char *) 1;
-    split->action      = nullptr;
+    split->memo.clear();
+    split->action.clear();
     split->reconciled  = NREC;
     split->amount      = gnc_numeric_zero();
     split->value       = gnc_numeric_zero();
@@ -764,7 +780,7 @@ xaccFreeSplit (Split *split)
     split->reconciled_balance = gnc_numeric_zero();
     split->noclosing_balance  = gnc_numeric_zero();
     split->adjusted_amount    = gnc_numeric_zero();
-    split->split_type         = nullptr;
+    split->split_type.reset();
 
     split->date_reconciled = 0;
     G_OBJECT_CLASS (QOF_INSTANCE_GET_CLASS (&split->inst))->dispose(G_OBJECT (split));
@@ -821,8 +837,6 @@ xaccSplitEqual(const Split *sa, const Split *sb,
                gboolean check_balances,
                gboolean check_txn_splits)
 {
-    gboolean same_book;
-
     if (!sa && !sb) return TRUE; /* Arguable. FALSE is better, methinks */
 
     if (!sa || !sb)
@@ -833,8 +847,6 @@ xaccSplitEqual(const Split *sa, const Split *sb,
 
     if (sa == sb) return TRUE;
 
-    same_book = qof_instance_get_book(QOF_INSTANCE(sa)) == qof_instance_get_book(QOF_INSTANCE(sb));
-
     if (check_guids)
     {
         if (qof_instance_guid_compare(sa, sb) != 0)
@@ -844,17 +856,15 @@ xaccSplitEqual(const Split *sa, const Split *sb,
         }
     }
 
-    /* If the same book, since these strings are cached we can just use pointer equality */
-    if ((same_book && sa->memo != sb->memo) || (!same_book && g_strcmp0(sa->memo, sb->memo) != 0))
+    if (sa->memo != sb->memo)
     {
-        PINFO ("memos differ: (%p)%s vs (%p)%s",
-               sa->memo, sa->memo, sb->memo, sb->memo);
+        PINFO ("memos differ: %s vs %s", sa->memo.c_str(), sb->memo.c_str());
         return FALSE;
     }
 
-    if ((same_book && sa->action != sb->action) || (!same_book && g_strcmp0(sa->action, sb->action) != 0))
+    if (sa->action != sb->action)
     {
-        PINFO ("actions differ: %s vs %s", sa->action, sb->action);
+        PINFO ("actions differ: %s vs %s", sa->action.c_str(), sb->action.c_str());
         return FALSE;
     }
 
@@ -1537,8 +1547,6 @@ xaccSplitOrder (const Split *sa, const Split *sb)
 {
     int retval;
     int comp;
-    const char *da, *db;
-    gboolean action_for_num;
 
     if (sa == sb) return 0;
     /* nothing is always less than something */
@@ -1547,26 +1555,20 @@ xaccSplitOrder (const Split *sa, const Split *sb)
 
     /* sort in transaction order, but use split action rather than trans num
      * according to book option */
-    action_for_num = qof_book_use_split_action_for_num_field
-        (xaccSplitGetBook (sa));
-    if (action_for_num)
-        retval = xaccTransOrder_num_action (sa->parent, sa->action,
-                                            sb->parent, sb->action);
+    if (qof_book_use_split_action_for_num_field (xaccSplitGetBook (sa)))
+        retval = xaccTransOrder_num_action (sa->parent, sa->action.c_str(),
+                                            sb->parent, sb->action.c_str());
     else
         retval = xaccTransOrder (sa->parent, sb->parent);
     if (retval) return retval;
 
     /* otherwise, sort on memo strings */
-    da = sa->memo ? sa->memo : "";
-    db = sb->memo ? sb->memo : "";
-    retval = g_utf8_collate (da, db);
+    retval = g_utf8_collate (sa->memo.c_str(), sb->memo.c_str());
     if (retval)
         return retval;
 
     /* otherwise, sort on action strings */
-    da = sa->action ? sa->action : "";
-    db = sb->action ? sb->action : "";
-    retval = g_utf8_collate (da, db);
+    retval = g_utf8_collate (sa->action.c_str(), sb->action.c_str());
     if (retval != 0)
         return retval;
 
@@ -1760,7 +1762,7 @@ static void
 qofSplitSetMemo (Split *split, const char* memo)
 {
     g_return_if_fail(split);
-    CACHE_REPLACE(split->memo, memo);
+    split->memo = memo ? memo : "";
 }
 
 void
@@ -1769,7 +1771,7 @@ xaccSplitSetMemo (Split *split, const char *memo)
     if (!split || !memo) return;
     xaccTransBeginEdit (split->parent);
 
-    CACHE_REPLACE(split->memo, memo);
+    split->memo = memo;
     qof_instance_set_dirty(QOF_INSTANCE(split));
     xaccTransCommitEdit(split->parent);
 
@@ -1779,7 +1781,7 @@ static void
 qofSplitSetAction (Split *split, const char *actn)
 {
     g_return_if_fail(split);
-    CACHE_REPLACE(split->action, actn);
+    split->action = actn ? actn : "";
 }
 
 void
@@ -1788,7 +1790,7 @@ xaccSplitSetAction (Split *split, const char *actn)
     if (!split || !actn) return;
     xaccTransBeginEdit (split->parent);
 
-    CACHE_REPLACE(split->action, actn);
+    split->action = actn;
     qof_instance_set_dirty(QOF_INSTANCE(split));
     xaccTransCommitEdit(split->parent);
 
@@ -1906,8 +1908,8 @@ xaccSplitSetParent(Split *s, Transaction *t)
         xaccSplitSetValue(s, xaccSplitGetValue(s));
 
         /* add ourselves to the new transaction's list of pending splits. */
-        if (nullptr == g_list_find(t->splits, s))
-            t->splits = g_list_append(t->splits, s);
+        if (std::find (t->splits.begin(), t->splits.end(), s) == t->splits.end())
+            t->splits.push_back (s);
 
         ed.idx = -1; /* unused */
         qof_event_gen(&t->inst, GNC_EVENT_ITEM_ADDED, &ed);
@@ -1934,7 +1936,7 @@ xaccSplitSetLot(Split* split, GNCLot* lot)
 const char *
 xaccSplitGetMemo (const Split *split)
 {
-    return split ? split->memo : nullptr;
+    return split ? split->memo.c_str() : nullptr;
 }
 
 void
@@ -1969,7 +1971,7 @@ xaccSplitHasOnlineID (const Split *split)
 const char *
 xaccSplitGetAction (const Split *split)
 {
-    return split ? split->action : nullptr;
+    return split ? split->action.c_str() : nullptr;
 }
 
 char
@@ -2045,16 +2047,16 @@ xaccSplitGetType(Split *s)
         auto type{qof_instance_get_path_kvp<const char*> (QOF_INSTANCE(s), {"split-type"})};
 
         if (!type || !g_strcmp0 (*type, split_type_normal))
-            s->split_type = split_type_normal;
+            s->split_type = SplitType::normal;
         else if (!g_strcmp0 (*type, split_type_stock_split))
-            s->split_type = split_type_stock_split;
+            s->split_type = SplitType::stock_split;
         else
         {
             PERR ("unexpected split-type %s, reset to normal.", *type);
-            s->split_type = split_type_normal;
+            s->split_type = SplitType::normal;
         }
     }
-    return s->split_type;
+    return split_type_name (*s->split_type);
 }
 
 /* reconfigure a split to be a stock split - after this, you shouldn't
@@ -2065,7 +2067,7 @@ xaccSplitMakeStockSplit(Split *s)
     xaccTransBeginEdit (s->parent);
 
     s->value = gnc_numeric_zero();
-    s->split_type = split_type_stock_split;
+    s->split_type = SplitType::stock_split;
     qof_instance_set_path_kvp<const char*> (QOF_INSTANCE(s), g_strdup(split_type_stock_split),
                                             {"split-type"});
     SET_GAINS_VDIRTY(s);
@@ -2077,7 +2079,8 @@ xaccSplitMakeStockSplit(Split *s)
 gboolean
 xaccSplitIsStockSplit (Split *s)
 {
-    return g_strcmp0(split_type_stock_split, xaccSplitGetType(s)) == 0;
+    return s && xaccSplitGetType (s) &&
+        s->split_type == SplitType::stock_split;
 }
 
 void
@@ -2167,9 +2170,8 @@ xaccSplitGetOtherSplit (const Split *split)
     trans = split->parent;
     if (!trans) return nullptr;
 
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+    for (auto s : xaccTransGetSplits (trans))
     {
-        Split *s = GNC_SPLIT(n->data);
         if ((s == split) ||
             (!xaccTransStillHasSplit(trans, s)) ||
             (xaccAccountGetType (xaccSplitGetAccount (s)) == ACCT_TYPE_TRADING) ||

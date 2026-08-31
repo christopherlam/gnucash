@@ -62,6 +62,7 @@
 #include "gnc-session.h"
 #include "Transaction.h"
 #include "TransactionP.hpp"
+#include "Transaction.hpp"
 #include "Recurrence.h"
 #include "SchedXaction.h"
 #include "SX-book.h"
@@ -915,8 +916,6 @@ make_random_changes_to_transaction_and_splits (QofBook *book,
         Transaction *trans,
         GList *accounts)
 {
-    GList *splits;
-    GList *node;
     Split *split;
 
     g_return_if_fail (book);
@@ -949,10 +948,8 @@ make_random_changes_to_transaction_and_splits (QofBook *book,
         if (xaccTransGetVoidStatus (trans))
             break;
 
-        splits = xaccTransGetSplitList (trans);
-        for (node = splits; node; node = node->next)
+        for (auto split : xaccTransGetSplits (trans))
         {
-            auto split = static_cast<Split *>(node->data);
             auto account = static_cast<Account*>(get_random_list_element (accounts));
 
             xaccAccountInsertSplit (account, split);
@@ -975,11 +972,8 @@ make_random_changes_to_transaction_and_splits (QofBook *book,
     }
 
     /* mess with the splits */
-    splits = xaccTransGetSplitList (trans);
-    for (node = splits; node; node = node->next)
+    for (auto split : xaccTransGetSplits (trans))
     {
-        auto split = static_cast<Split *>(node->data);
-
         if (get_random_boolean ())
             make_random_changes_to_split (split);
     }
@@ -1992,15 +1986,11 @@ make_trans_query (Transaction *trans, TestQueryTypes query_types)
     if (query_types & ACCOUNT_QT)
     {
         GList * list;
-        GList * node;
 
         /* QOF_GUID_MATCH_ALL */
         list = NULL;
-        for (node = xaccTransGetSplitList (trans); node; node = node->next)
-        {
-            auto split = static_cast<Split * >(node->data);
+        for (auto split : xaccTransGetSplits (trans))
             list = g_list_prepend (list, xaccSplitGetAccount (split));
-        }
         xaccQueryAddAccountMatch (q, list, QOF_GUID_MATCH_ALL, QOF_QUERY_AND);
         g_list_free (list);
 

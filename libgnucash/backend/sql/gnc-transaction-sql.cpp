@@ -37,6 +37,7 @@
 #include "Account.h"
 #include "Transaction.h"
 #include <TransactionP.hpp>
+#include <Transaction.hpp>
 #include <Scrub.h>
 #include "gnc-lot.h"
 #include "engine-helpers.h"
@@ -525,8 +526,8 @@ delete_splits (GncSqlBackend* sql_be, Transaction* pTx)
     split_info.be = sql_be;
     split_info.is_ok = TRUE;
 
-    g_list_foreach (xaccTransGetSplitList (pTx), delete_split_slots_cb,
-                    &split_info);
+    for (auto split : xaccTransGetSplits (pTx))
+        delete_split_slots_cb (split, &split_info);
 
     return split_info.is_ok;
 }

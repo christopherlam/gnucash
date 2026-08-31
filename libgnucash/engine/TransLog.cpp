@@ -221,7 +221,6 @@ xaccCloseLog (void)
 void
 xaccTransWriteLog (Transaction *trans, char flag)
 {
-    GList *node;
     char trans_guid_str[GUID_ENCODING_LENGTH + 1];
     char split_guid_str[GUID_ENCODING_LENGTH + 1];
     const char *trans_notes;
@@ -241,9 +240,8 @@ xaccTransWriteLog (Transaction *trans, char flag)
     trans_notes = xaccTransGetNotes(trans);
     trans_log_stream << "===== START\n";
 
-    for (node = trans->splits; node; node = node->next)
+    for (auto split : trans->splits)
     {
-        Split *split = GNC_SPLIT(node->data);
         const char * accname = "";
         char acc_guid_str[GUID_ENCODING_LENGTH + 1];
         gnc_numeric amt, val;
@@ -273,11 +271,11 @@ xaccTransWriteLog (Transaction *trans, char flag)
                          << dpost << '\t'
                          << acc_guid_str << '\t'
                          << (accname ? accname : "") << '\t'
-                         << (trans->num ? trans->num : "") << '\t'
-                         << (trans->description ? trans->description : "") << '\t'
+                         << trans->num << '\t'
+                         << trans->description << '\t'
                          << (trans_notes ? trans_notes : "") << '\t'
-                         << (split->memo ? split->memo : "") << '\t'
-                         << (split->action ? split->action : "") << '\t'
+                         << split->memo << '\t'
+                         << split->action << '\t'
                          << split->reconciled << '\t'
                          << gnc_numeric_num(amt) << '/' << gnc_numeric_denom(amt) << '\t'
                          << gnc_numeric_num(val) << '/' << gnc_numeric_denom(val) << '\t'

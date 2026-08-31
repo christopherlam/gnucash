@@ -49,6 +49,7 @@
 #include "gnc-plugin-page-report.h"
 #include "gnc-plugin-business.h"
 
+#include <Transaction.hpp>
 #include "dialog-account.h"
 #include "dialog-dup-trans.h"
 #include "dialog-find-account.h"
@@ -738,9 +739,8 @@ invoices_from_transaction (const Transaction* trans)
 
     g_return_val_if_fail (GNC_IS_TRANSACTION (trans), rv);
 
-    for (auto node = xaccTransGetSplitList (trans); node; node = g_list_next (node))
+    for (auto split : xaccTransGetSplits (trans))
     {
-        auto split = GNC_SPLIT(node->data);
         auto account = xaccSplitGetAccount (split);
         if (!account || !xaccAccountIsAPARType(xaccAccountGetType(account)))
             continue;
@@ -3248,7 +3248,6 @@ static Split*
 jump_multiple_splits_by_single_account (Account *account, Split *split)
 {
     Transaction *trans;
-    SplitList *splits;
     Account *other_account = NULL;
     Split *other_split = NULL;
 
@@ -3256,9 +3255,8 @@ jump_multiple_splits_by_single_account (Account *account, Split *split)
     if (!trans)
         return NULL;
 
-    for (splits = xaccTransGetSplitList(trans); splits; splits = splits->next)
+    for (auto s : xaccTransGetSplits (trans))
     {
-        Split *s = (Split*)splits->data;
         Account *a = xaccSplitGetAccount(s);
 
         if (!xaccTransStillHasSplit(trans, s))
@@ -3290,7 +3288,6 @@ static Split*
 jump_multiple_splits_by_value (Account *account, Split *split, gboolean largest)
 {
     Transaction *trans;
-    SplitList *splits;
     Split *other_split = NULL;
     gnc_numeric best;
     int cmp = largest ? 1 : -1;
@@ -3299,9 +3296,8 @@ jump_multiple_splits_by_value (Account *account, Split *split, gboolean largest)
     if (!trans)
         return NULL;
 
-    for (splits = xaccTransGetSplitList(trans); splits; splits = splits->next)
+    for (auto s : xaccTransGetSplits (trans))
     {
-        Split *s = (Split*)splits->data;
         gnc_numeric value;
 
         if (!xaccTransStillHasSplit(trans, s))

@@ -582,6 +582,7 @@ test_gnc_txn_to_float_txn (Fixture *fixture, gconstpointer pData)
 
     g_assert_null (fsiter->next);
 
+    g_list_free (sl);
     gnc_float_txn_free (ft);
 }
 static void
@@ -639,6 +640,7 @@ test_gnc_txn_to_float_txn_cut_semantics (Fixture *fixture, gconstpointer pData)
 
     g_assert_null (fsiter->next);
 
+    g_list_free (sl);
     gnc_float_txn_free (ft);
 }
 
@@ -703,7 +705,7 @@ impl_test_gnc_float_txn_to_txn_swap_accounts (FlFixture *fixture,  const SwapCom
     Transaction *txn = xaccMallocTransaction (fixture->book);
     Account *sw_acct1 = NULL, *sw_acct2 = NULL;
     Account *exp_acct1 = fixture->acc1, *exp_acct2 = fixture->acc2;
-    SplitList *siter;
+    SplitList *sl, *siter;
     Split *s;
 
     if (prefs->swap_accts)
@@ -725,7 +727,8 @@ impl_test_gnc_float_txn_to_txn_swap_accounts (FlFixture *fixture,  const SwapCom
     g_assert_cmpint (fixture->ft.m_date_posted, ==, xaccTransGetDate (txn));
 
     /* Next compare values for first split */
-    siter = xaccTransGetSplitList (txn);
+    sl = xaccTransGetSplitList (txn);
+    siter = sl;
     g_assert_nonnull (siter);
 
     s = siter->data;
@@ -753,6 +756,7 @@ impl_test_gnc_float_txn_to_txn_swap_accounts (FlFixture *fixture,  const SwapCom
     /* Test there are only two splits */
     siter = siter->next;
     g_assert_null (siter);
+    g_list_free (sl);
 
     /* Verify whether transaction is still open or not  based on input value */
     g_assert_true (xaccTransIsOpen (txn) != prefs->docommit);
@@ -878,6 +882,8 @@ test_gnc_template_to_template (TemplateFixture *fixture, gconstpointer pData)
     g_free (cn);
     g_free (dn);
 
+    g_list_free (sl_template_txn);
+    g_list_free (sl_new_txn);
     gnc_float_txn_free (ft);
 }
 
@@ -965,6 +971,8 @@ test_gnc_normal_to_template (TemplateFixture *fixture, gconstpointer pData)
     g_free (cn);
     g_free (dn);
 
+    g_list_free (sl_txn);
+    g_list_free (sl_new_txn);
     gnc_float_txn_free (ft);
 }
 
@@ -1036,6 +1044,8 @@ test_gnc_template_to_normal (TemplateFixture *fixture, gconstpointer pData)
     g_free (cn);
     g_free (dn);
 
+    g_list_free (sl_template_txn);
+    g_list_free (sl_new_txn);
     gnc_float_txn_free (ft);
 }
 
