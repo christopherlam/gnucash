@@ -26,14 +26,13 @@ class MockTransaction : public Transaction
 public:
     MockTransaction()
     {
-        num                 = nullptr;
-        description         = nullptr;
+        /* num, description, splits and orig are C++ members and are
+         * default-constructed with the base subobject. */
         common_currency     = nullptr;
-        splits              = nullptr;
         date_entered        = 0;
         date_posted         = 0;
         marker              = 0;
-        orig                = nullptr;
+        freed               = false;
     }
     void* operator new(size_t size)
     {

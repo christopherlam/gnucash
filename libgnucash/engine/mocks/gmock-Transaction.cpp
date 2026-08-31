@@ -6,6 +6,14 @@
 
 #include <numeric>
 
+/* The engine defines this in Transaction.cpp, which the mock-based tests
+ * do not link. A MockTransaction never holds a rollback copy, so the
+ * deleter is instantiated by unique_ptr but never called. */
+void
+TransDeleter::operator() (Transaction*) const
+{
+}
+
 
 struct _MockTransactionClass
 {
