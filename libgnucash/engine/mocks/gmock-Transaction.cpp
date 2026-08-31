@@ -4,6 +4,16 @@
 
 #include "gmock-Transaction.h"
 
+#include <numeric>
+
+/* The engine defines this in Transaction.cpp, which the mock-based tests
+ * do not link. A MockTransaction never holds a rollback copy, so the
+ * deleter is instantiated by unique_ptr but never called. */
+void
+TransDeleter::operator() (Transaction*) const
+{
+}
+
 
 struct _MockTransactionClass
 {
@@ -53,11 +63,20 @@ xaccTransGetSplit (const Transaction *trans, int i)
     return mocktrans ? mocktrans->get_split(i) : nullptr;
 }
 
+const SplitsVec&
+xaccTransGetSplits (const Transaction *trans)
+{
+    static const SplitsVec empty;
+    g_return_val_if_fail(GNC_IS_MOCKTRANSACTION(trans), empty);
+    return trans ? ((MockTransaction*)trans)->get_splits() : empty;
+}
+
 SplitList *
 xaccTransGetSplitList (const Transaction *trans)
 {
-    g_return_val_if_fail(GNC_IS_MOCKTRANSACTION(trans), NULL);
-    return trans ? ((MockTransaction*)trans)->get_split_list() : NULL;
+    const auto& splits{xaccTransGetSplits (trans)};
+    return std::accumulate (splits.rbegin(), splits.rend(),
+                            static_cast<GList*>(nullptr), g_list_prepend);
 }
 
 Split *

@@ -9,6 +9,7 @@
 
 #include <Transaction.h>
 #include <TransactionP.hpp>
+#include <Transaction.hpp>
 
 #include "gmock-gobject.h"
 
@@ -25,14 +26,13 @@ class MockTransaction : public Transaction
 public:
     MockTransaction()
     {
-        num                 = nullptr;
-        description         = nullptr;
+        /* num, description, splits and orig are C++ members and are
+         * default-constructed with the base subobject. */
         common_currency     = nullptr;
-        splits              = nullptr;
         date_entered        = 0;
         date_posted         = 0;
         marker              = 0;
-        orig                = nullptr;
+        freed               = false;
     }
     void* operator new(size_t size)
     {
@@ -52,7 +52,7 @@ public:
     MOCK_METHOD0(begin_edit, void());
     MOCK_METHOD0(commit_edit, void());
     MOCK_CONST_METHOD1(get_split, Split *(int));
-    MOCK_CONST_METHOD0(get_split_list, GList*());
+    MOCK_CONST_METHOD0(get_splits, const SplitsVec&());
     MOCK_CONST_METHOD1(find_split_by_account, Split *(const Account*));
     MOCK_CONST_METHOD0(get_date, time64());
     MOCK_METHOD1(set_date_posted_secs_normalized, void(time64));

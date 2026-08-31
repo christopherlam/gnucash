@@ -1538,7 +1538,7 @@ gboolean gnc_ui_payment_is_customer_payment(const Transaction *txn)
     if (!txn)
         return result;
 
-    if (!xaccTransGetSplitList(txn))
+    if (!xaccTransCountSplits(txn))
         return result;
 
     /* First test if one split is in an A/R or A/P account.
@@ -1807,7 +1807,7 @@ PaymentWindow * gnc_ui_payment_new_with_txn (GtkWindow* parent, GncOwner *owner,
     if (!txn)
         return NULL;
 
-    if (!xaccTransGetSplitList(txn))
+    if (!xaccTransCountSplits(txn))
         return NULL;
 
     /* We require the txn to have one split in an Asset account.

@@ -39,10 +39,16 @@
 #ifndef XACC_ACCOUNT_P_H
 #define XACC_ACCOUNT_P_H
 
-#include <vector>
 #include <optional>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "Account.h"
+#include "Account.hpp"
+
+using SplitsSet = std::unordered_set<const Split*>;
+using LotsVec = std::vector<GNCLot*>;
 
 #define GNC_ID_ROOT_ACCOUNT        "RootAccount"
 
@@ -61,7 +67,7 @@ typedef struct AccountPrivate
      * It is intended to be a short, 5 to 30 character long string that
      * is displayed by the GUI as the account mnemonic.
      */
-    const char *accountName;
+    std::string accountName;
 
     /* The accountCode is an arbitrary string assigned by the user.
      * It is intended to be reporting code that is a synonym for the
@@ -70,13 +76,13 @@ typedef struct AccountPrivate
      * as 100, 200 or 600 for top-level accounts, and 101, 102..  etc.
      * for detail accounts.
      */
-    const char *accountCode;
+    std::string accountCode;
 
     /* The description is an arbitrary string assigned by the user.
      * It is intended to be a longer, 1-5 sentence description of what
      * this account is all about.
      */
-    const char *description;
+    std::string description;
 
     /* The type field is the account type, picked from the enumerated
      * list that includes ACCT_TYPE_BANK, ACCT_TYPE_STOCK,
@@ -99,7 +105,7 @@ typedef struct AccountPrivate
      * hierarchy, of accounts that have sub-accounts ("detail accounts").
      */
     Account *parent;    /* back-pointer to parent */
-    std::vector<Account*> children;    /* list of sub-accounts */
+    AccountVec children;               /* list of sub-accounts */
 
     /* protected data - should only be set by backends */
     gnc_numeric starting_balance;
@@ -116,20 +122,12 @@ typedef struct AccountPrivate
     gboolean balance_dirty;     /* balances in splits incorrect */
     gboolean has_stock_split;   /* account includes a stock split */
 
-    std::vector<Split*> splits;              /* list of split pointers */
-    GHashTable* splits_hash;
+    SplitsVec splits;                        /* the account's splits, in order */
+    SplitsSet splits_set;       /* membership test for splits */
     gboolean sort_dirty;        /* sort order of splits is bad */
 
-    LotList   *lots;		/* list of lot pointers */
+    LotsVec lots;               /* the account's lots */
     GNCPolicy *policy;		/* Cached pointer to policy method */
-
-    char *notes;
-    char *color;
-    char *tax_us_code;
-    char *tax_us_pns;
-    char *last_num;
-    char *sort_order;
-    char *filter;
 
     /* The "mark" flag can be used by the user to mark this account
      * in any way desired.  Handy for specialty traversals of the

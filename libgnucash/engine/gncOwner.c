@@ -1011,7 +1011,7 @@ gncOwnerSetLotLinkMemo (Transaction *ll_txn)
 {
     gchar *memo_prefix = _("Offset between business items: ");
     gchar *new_memo;
-    SplitList *lts_iter;
+    SplitList *ll_splits, *lts_iter;
     SplitList *splits = NULL, *siter;
     GList *titles = NULL, *titer;
 
@@ -1022,7 +1022,8 @@ gncOwnerSetLotLinkMemo (Transaction *ll_txn)
         return;
 
     // Find all splits in the lot link transaction that are also in a document lot
-    for (lts_iter = xaccTransGetSplitList (ll_txn); lts_iter; lts_iter = lts_iter->next)
+    ll_splits = xaccTransGetSplitList (ll_txn);
+    for (lts_iter = ll_splits; lts_iter; lts_iter = lts_iter->next)
     {
         Split *split = lts_iter->data;
         GNCLot *lot;
@@ -1045,6 +1046,7 @@ gncOwnerSetLotLinkMemo (Transaction *ll_txn)
         titles = g_list_prepend (titles, title);
         splits = g_list_prepend (splits, split); // splits don't need to be sorted
     }
+    g_list_free (ll_splits);
 
     if (!titles)
         return; // We didn't find document lots
@@ -1093,12 +1095,14 @@ get_ll_transaction_from_lot (GNCLot *lot)
     {
         Split *ls = ls_iter->data;
         Transaction *ll_txn = xaccSplitGetParent (ls);
-        SplitList *ts_iter;
+        SplitList *ts_splits, *ts_iter;
+        Transaction *found = NULL;
 
         if (xaccTransGetTxnType (ll_txn) != TXN_TYPE_LINK)
             continue;
 
-        for (ts_iter = xaccTransGetSplitList (ll_txn); ts_iter; ts_iter = ts_iter->next)
+        ts_splits = xaccTransGetSplitList (ll_txn);
+        for (ts_iter = ts_splits; ts_iter; ts_iter = ts_iter->next)
         {
             Split *ts = ts_iter->data;
             GNCLot *tslot = xaccSplitGetLot (ts);
@@ -1110,8 +1114,14 @@ get_ll_transaction_from_lot (GNCLot *lot)
                 continue;
 
             if (gncInvoiceGetInvoiceFromLot (lot))
-                return ll_txn; /* Got one more document lot - mission accomplished */
+            {
+                found = ll_txn; /* Got one more document lot - mission accomplished */
+                break;
+            }
         }
+        g_list_free (ts_splits);
+        if (found)
+            return found;
     }
 
     /* The lot doesn't have an ll_txn with the requested criteria... */

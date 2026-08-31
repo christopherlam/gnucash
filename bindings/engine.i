@@ -118,6 +118,7 @@ engine-common.i */
 %newobject gnc_account_get_full_name;
 %newobject xaccTransGetAPARAcctSplitList;
 %newobject xaccTransGetPaymentAcctSplitList;
+%newobject xaccTransGetSplitList;
 %newobject xaccAccountGetSplitList;
 
 %newobject gnc_date_interval_format;

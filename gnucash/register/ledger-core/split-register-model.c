@@ -104,7 +104,8 @@ gnc_split_register_get_rbaln (VirtualLocation virt_loc, gpointer user_data,
         trans = xaccSplitGetParent (split);
 
         i = 1;
-        for (node = xaccTransGetSplitList (trans); node; node = node->next)
+        GList *splits = xaccTransGetSplitList (trans);
+        for (node = splits; node; node = node->next)
         {
             Split* secondary = node->data;
 
@@ -134,6 +135,7 @@ gnc_split_register_get_rbaln (VirtualLocation virt_loc, gpointer user_data,
                     balance = gnc_numeric_add_fixed (balance, xaccSplitGetAmount (secondary));
             }
         }
+        g_list_free (splits);
         virt_loc.vcell_loc.virt_row += i;
     }
 
@@ -2132,8 +2134,10 @@ static gboolean reg_trans_has_reconciled_splits (SplitRegister* reg,
                                                  Transaction* trans)
 {
     GList* node;
+    GList* splits = xaccTransGetSplitList (trans);
+    gboolean rv = FALSE;
 
-    for (node = xaccTransGetSplitList (trans); node; node = node->next)
+    for (node = splits; node; node = node->next)
     {
         Split* split = node->data;
 
@@ -2142,10 +2146,14 @@ static gboolean reg_trans_has_reconciled_splits (SplitRegister* reg,
 
         if ((xaccSplitGetReconcile (split) == YREC) &&
             (g_list_index (reg->unrecn_splits, split) == -1))
-            return TRUE;
+        {
+            rv = TRUE;
+            break;
+        }
     }
+    g_list_free (splits);
 
-    return FALSE;
+    return rv;
 }
 
 static gboolean
@@ -2210,7 +2218,8 @@ gnc_split_register_confirm (VirtualLocation virt_loc, gpointer user_data)
         gchar* acc_list = NULL;
         gchar* message_format;
 
-        for (GList *node = xaccTransGetSplitList (trans); node; node = node->next)
+        GList* splits = xaccTransGetSplitList (trans);
+        for (GList *node = splits; node; node = node->next)
         {
             Split* split = node->data;
 
@@ -2223,6 +2232,7 @@ gnc_split_register_confirm (VirtualLocation virt_loc, gpointer user_data)
                 acc_g_list = g_list_prepend (acc_g_list, name);
             }
         }
+        g_list_free (splits);
         acc_list = gnc_g_list_stringjoin (acc_g_list, "\n");
         title = _ ("Change transaction containing a reconciled split?");
         message_format =

@@ -1191,7 +1191,8 @@ gnc_split_register_change_blank_split_ref (SplitRegister* reg, Split* split)
     Transaction* trans = xaccSplitGetParent (split);
 
     // loop through splitlist looking for splits other than the blank_split
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+    GList *splits = xaccTransGetSplitList (trans);
+    for (GList *n = splits; n; n = n->next)
     {
         Split *s = n->data;
         if (s != current_blank_split && xaccTransStillHasSplit (trans, s))
@@ -1202,6 +1203,7 @@ gnc_split_register_change_blank_split_ref (SplitRegister* reg, Split* split)
                 other_split = s; // any other split
         }
     }
+    g_list_free (splits);
     // now change the saved blank split reference
     if (pref_split != NULL)
         info->blank_split_guid = *xaccSplitGetGUID (pref_split);

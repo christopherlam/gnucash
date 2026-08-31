@@ -32,8 +32,9 @@ public:
         orig_parent = nullptr;
         lot         = nullptr;
 
-        action      = nullptr;
-        memo        = nullptr;
+        /* action, memo and split_type are C++ members and are
+         * default-constructed with the base subobject. */
+        freed       = false;
         reconciled  = VREC;
         amount      = gnc_numeric_zero();
         value       = gnc_numeric_zero();

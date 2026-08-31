@@ -76,8 +76,8 @@ setup (Fixture *fixture, gconstpointer pData)
     xaccSplitSetParent (fixture->split, txn);
     xaccTransCommitEdit (txn);
     xaccAccountInsertLot (acc, lot);
-    fixture->split->action = CACHE_INSERT ("foo");
-    fixture->split->memo = CACHE_INSERT ("bar");
+    fixture->split->action = "foo";
+    fixture->split->memo = "bar";
     fixture->split->acc = acc;
     fixture->split->lot = lot;
     fixture->split->parent = txn;
@@ -129,8 +129,8 @@ test_gnc_split_init ()
     g_assert_true (split->orig_acc == NULL);
     g_assert_true (split->parent == NULL);
     g_assert_true (split->lot == NULL);
-    g_assert_cmpstr (split->action, ==, "");
-    g_assert_cmpstr (split->memo, ==, "");
+    g_assert_cmpstr (split->action.c_str(), ==, "");
+    g_assert_cmpstr (split->memo.c_str(), ==, "");
     g_assert_cmpint (split->reconciled, ==, NREC);
     g_assert_true (gnc_numeric_zero_p (split->amount));
     g_assert_true (gnc_numeric_zero_p (split->value));
@@ -298,8 +298,8 @@ test_xaccDupeSplit (Fixture *fixture, gconstpointer pData)
     g_assert_true (split->acc == f_split->acc);
     g_assert_true (split->orig_acc == f_split->orig_acc);
     g_assert_true (split->lot == f_split->lot);
-    g_assert_cmpstr (split->memo, ==, f_split->memo);
-    g_assert_cmpstr (split->action, ==, f_split->action);
+    g_assert_cmpstr (split->memo.c_str(), ==, f_split->memo.c_str());
+    g_assert_cmpstr (split->action.c_str(), ==, f_split->action.c_str());
     g_assert_true (compare (split->inst.kvp_data, f_split->inst.kvp_data) == 0);
     g_assert_cmpint (split->reconciled, ==, f_split->reconciled);
     g_assert_cmpint (split->date_reconciled, ==, f_split->date_reconciled);
@@ -333,8 +333,8 @@ test_xaccSplitCloneNoKvp (Fixture *fixture, gconstpointer pData)
     /* Clone doesn't copy the orig_acc */
     g_assert_true (split->orig_acc == NULL);
     g_assert_true (split->lot == f_split->lot);
-    g_assert_cmpstr (split->memo, ==, f_split->memo);
-    g_assert_cmpstr (split->action, ==, f_split->action);
+    g_assert_cmpstr (split->memo.c_str(), ==, f_split->memo.c_str());
+    g_assert_cmpstr (split->action.c_str(), ==, f_split->action.c_str());
     g_assert_true (split->inst.kvp_data->empty());
     g_assert_cmpint (split->reconciled, ==, f_split->reconciled);
     g_assert_cmpint (split->date_reconciled, == , f_split->date_reconciled);
@@ -476,9 +476,8 @@ test_xaccSplitEqual (Fixture *fixture, gconstpointer pData)
     g_assert_cmpint (checkD.hits, ==, 0);
     /* Change the memo and action and test that each in turn causes the comparison to fail */
     split1->memo = "baz";
-    msg03 = g_strdup_printf ("[xaccSplitEqual] memos differ: (%p)%s vs (%p)%s",
-                             fixture->split->memo, fixture->split->memo,
-                             split1->memo, split1->memo);
+    msg03 = g_strdup_printf ("[xaccSplitEqual] memos differ: %s vs %s",
+                             fixture->split->memo.c_str(), split1->memo.c_str());
     checkA.msg = msg03;
     g_assert_true (xaccSplitEqual (fixture->split, split1, TRUE, TRUE, TRUE) == FALSE);
     g_assert_cmpint (checkA.hits, ==, 4);
@@ -1160,7 +1159,7 @@ test_xaccSplitOrder (Fixture *fixture, gconstpointer pData)
     g_assert_cmpint (xaccSplitOrder (split, o_split), ==, +1);
 
     /* Revert settings for the rest of the test */
-    o_split->action = NULL;
+    o_split->action.clear();
     split->action = "foo";
     o_split->parent = NULL;
     qof_book_begin_edit (book);

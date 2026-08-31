@@ -531,7 +531,8 @@ FloatingTxn *gnc_txn_to_float_txn (Transaction *txn, gboolean use_cut_semantics,
     ft->m_notes = CACHE_INSERT (xaccTransGetNotes (txn));
     ft->m_doclink = CACHE_INSERT (xaccTransGetDocLink (txn));
 
-    for (iter = xaccTransGetSplitList (txn); iter ; iter = iter->next)
+    GList *txn_splits = xaccTransGetSplitList (txn);
+    for (iter = txn_splits; iter ; iter = iter->next)
     {
         Split *split = iter->data;
         if (split && xaccTransStillHasSplit (txn, split))
@@ -540,6 +541,7 @@ FloatingTxn *gnc_txn_to_float_txn (Transaction *txn, gboolean use_cut_semantics,
             ft->m_splits = g_list_prepend (ft->m_splits, fs);
         }
     }
+    g_list_free (txn_splits);
     ft->m_splits = g_list_reverse (ft->m_splits);
 
     return ft;

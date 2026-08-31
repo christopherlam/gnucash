@@ -304,16 +304,21 @@ gnc_account_init(Account* acc)
     priv = GET_PRIVATE(acc);
     priv->parent   = nullptr;
 
-    priv->accountName = qof_string_cache_insert("");
-    priv->accountCode = qof_string_cache_insert("");
-    priv->description = qof_string_cache_insert("");
+    /* The non-trivial C++ members live in a GObject-allocated block:
+     * construct them in place here and destroy them in finalize. */
+    new (&priv->accountName) std::string ();
+    new (&priv->accountCode) std::string ();
+    new (&priv->description) std::string ();
+    new (&priv->children) AccountVec ();
+    new (&priv->splits) SplitsVec ();
+    new (&priv->splits_set) SplitsSet ();
+    new (&priv->lots) LotsVec ();
 
     priv->type = ACCT_TYPE_NONE;
 
     priv->mark = 0;
 
     priv->policy = xaccGetFIFOPolicy();
-    priv->lots = nullptr;
 
     priv->commodity = nullptr;
     priv->commodity_scu = 0;
@@ -330,9 +335,6 @@ gnc_account_init(Account* acc)
     priv->balance_dirty = FALSE;
     priv->has_stock_split = false;
 
-    new (&priv->children) AccountVec ();
-    new (&priv->splits) SplitsVec ();
-    priv->splits_hash = g_hash_table_new (g_direct_hash, g_direct_equal);
     priv->sort_dirty = FALSE;
 }
 
@@ -345,6 +347,15 @@ gnc_account_dispose (GObject *acctp)
 static void
 gnc_account_finalize(GObject* acctp)
 {
+    auto priv{GET_PRIVATE (GNC_ACCOUNT (acctp))};
+    /* Counterpart to the placement new in gnc_account_init. */
+    priv->accountName.~basic_string();
+    priv->accountCode.~basic_string();
+    priv->description.~basic_string();
+    priv->lots.~LotsVec();
+    priv->splits_set.~SplitsSet();
+    priv->splits.~SplitsVec();
+    priv->children.~AccountVec();
     G_OBJECT_CLASS(gnc_account_parent_class)->finalize(acctp);
 }
 
@@ -370,16 +381,16 @@ gnc_account_get_property (GObject         *object,
     switch (prop_id)
     {
     case PROP_NAME:
-        g_value_set_string(value, priv->accountName);
+        g_value_set_string(value, priv->accountName.c_str());
         break;
     case PROP_FULL_NAME:
         g_value_take_string(value, gnc_account_get_full_name(account));
         break;
     case PROP_CODE:
-        g_value_set_string(value, priv->accountCode);
+        g_value_set_string(value, priv->accountCode.c_str());
         break;
     case PROP_DESCRIPTION:
-        g_value_set_string(value, priv->description);
+        g_value_set_string(value, priv->description.c_str());
         break;
     case PROP_COLOR:
         g_value_set_string(value, xaccAccountGetColor(account));
@@ -1290,7 +1301,7 @@ gnc_account_create_root (QofBook *book)
     rpriv = GET_PRIVATE(root);
     xaccAccountBeginEdit(root);
     rpriv->type = ACCT_TYPE_ROOT;
-    rpriv->accountName = qof_string_cache_replace(rpriv->accountName, "Root Account");
+    rpriv->accountName = "Root Account";
     mark_account (root);
     xaccAccountCommitEdit(root);
     gnc_book_set_root_account(book, root);
@@ -1319,9 +1330,9 @@ xaccCloneAccount(const Account *from, QofBook *book)
      * Also let caller issue the generate_event (EVENT_CREATE) */
     priv->type = from_priv->type;
 
-    priv->accountName = qof_string_cache_replace(priv->accountName, from_priv->accountName);
-    priv->accountCode = qof_string_cache_replace(priv->accountCode, from_priv->accountCode);
-    priv->description = qof_string_cache_replace(priv->description, from_priv->description);
+    priv->accountName = from_priv->accountName;
+    priv->accountCode = from_priv->accountCode;
+    priv->description = from_priv->description;
 
     qof_instance_copy_kvp (QOF_INSTANCE (ret), QOF_INSTANCE (from));
 
@@ -1371,7 +1382,6 @@ static void
 xaccFreeAccount (Account *acc)
 {
     AccountPrivate *priv;
-    GList *lp;
 
     g_return_if_fail(GNC_IS_ACCOUNT(acc));
 
@@ -1394,18 +1404,14 @@ xaccFreeAccount (Account *acc)
     }
 
     /* remove lots -- although these should be gone by now. */
-    if (priv->lots)
+    if (!priv->lots.empty())
     {
         PERR (" instead of calling xaccFreeAccount(), please call\n"
               " xaccAccountBeginEdit(); xaccAccountDestroy();\n");
 
-        for (lp = priv->lots; lp; lp = lp->next)
-        {
-            GNCLot *lot = static_cast<GNCLot*>(lp->data);
+        for (auto lot : priv->lots)
             gnc_lot_destroy (lot);
-        }
-        g_list_free (priv->lots);
-        priv->lots = nullptr;
+        priv->lots.clear();
     }
 
     /* Next, clean up the splits */
@@ -1429,21 +1435,12 @@ xaccFreeAccount (Account *acc)
 */
     }
 
-    qof_string_cache_remove(priv->accountName);
-    qof_string_cache_remove(priv->accountCode);
-    qof_string_cache_remove(priv->description);
-    priv->accountName = priv->accountCode = priv->description = nullptr;
+    priv->accountName.clear();
+    priv->accountCode.clear();
+    priv->description.clear();
 
     /* zero out values, just in case stray
      * pointers are pointing here. */
-
-    priv->last_num = nullptr;
-    priv->tax_us_code = nullptr;
-    priv->tax_us_pns = nullptr;
-    priv->color = nullptr;
-    priv->sort_order = nullptr;
-    priv->notes = nullptr;
-    priv->filter = nullptr;
 
     priv->parent = nullptr;
 
@@ -1459,9 +1456,9 @@ xaccFreeAccount (Account *acc)
     priv->balance_dirty = FALSE;
     priv->has_stock_split = false;
     priv->sort_dirty = FALSE;
-    priv->splits.~SplitsVec();
-    priv->children.~AccountVec();
-    g_hash_table_destroy (priv->splits_hash);
+    priv->splits.clear();
+    priv->splits_set.clear();
+    priv->children.clear();
 
     /* qof_instance_release (&acc->inst); */
     g_object_unref(acc);
@@ -1534,7 +1531,7 @@ xaccAccountCommitEdit (Account *acc)
         xaccFreeAccountChildren(acc);
 
         PINFO ("freeing splits for account %p (%s)",
-               acc, priv->accountName ? priv->accountName : "(null)");
+               acc, priv->accountName.c_str());
 
         book = qof_instance_get_book(acc);
 
@@ -1549,7 +1546,7 @@ xaccAccountCommitEdit (Account *acc)
         else
         {
             priv->splits.clear();
-            g_hash_table_remove_all (priv->splits_hash);
+            priv->splits_set.clear();
         }
 
         /* It turns out there's a case where this assertion does not hold:
@@ -1566,14 +1563,10 @@ xaccAccountCommitEdit (Account *acc)
             qof_collection_foreach(col, destroy_pending_splits_for_account, acc);
 
             /* the lots should be empty by now */
-            for (auto lp = priv->lots; lp; lp = lp->next)
-            {
-                GNCLot *lot = static_cast<GNCLot*>(lp->data);
+            for (auto lot : priv->lots)
                 gnc_lot_destroy (lot);
-            }
         }
-        g_list_free(priv->lots);
-        priv->lots = nullptr;
+        priv->lots.clear();
 
         qof_instance_set_dirty(&acc->inst);
         qof_instance_decrease_editlevel(acc);
@@ -1634,10 +1627,10 @@ xaccAcctChildrenEqual(const AccountVec& na,
         {
             if (!aa) return (!ab);
             if (!ab) return false;
-            auto code_a{GET_PRIVATE(aa)->accountCode};
-            auto code_b{GET_PRIVATE(ab)->accountCode};
-            if ((code_a && *code_a) || (code_b && *code_b)) return !g_strcmp0 (code_a, code_b);
-            return !g_strcmp0 (GET_PRIVATE(aa)->accountName, GET_PRIVATE(ab)->accountName);
+            const auto& code_a{GET_PRIVATE(aa)->accountCode};
+            const auto& code_b{GET_PRIVATE(ab)->accountCode};
+            if (!code_a.empty() || !code_b.empty()) return code_a == code_b;
+            return GET_PRIVATE(aa)->accountName == GET_PRIVATE(ab)->accountName;
         });
 
         if (it_b == nb.end())
@@ -1680,21 +1673,24 @@ xaccAccountEqual(const Account *aa, const Account *ab, gboolean check_guids)
         return FALSE;
     }
 
-    if (g_strcmp0(priv_aa->accountName, priv_ab->accountName) != 0)
+    if (priv_aa->accountName != priv_ab->accountName)
     {
-        PWARN ("names differ: %s vs %s", priv_aa->accountName, priv_ab->accountName);
+        PWARN ("names differ: %s vs %s", priv_aa->accountName.c_str(),
+               priv_ab->accountName.c_str());
         return FALSE;
     }
 
-    if (g_strcmp0(priv_aa->accountCode, priv_ab->accountCode) != 0)
+    if (priv_aa->accountCode != priv_ab->accountCode)
     {
-        PWARN ("codes differ: %s vs %s", priv_aa->accountCode, priv_ab->accountCode);
+        PWARN ("codes differ: %s vs %s", priv_aa->accountCode.c_str(),
+               priv_ab->accountCode.c_str());
         return FALSE;
     }
 
-    if (g_strcmp0(priv_aa->description, priv_ab->description) != 0)
+    if (priv_aa->description != priv_ab->description)
     {
-        PWARN ("descriptions differ: %s vs %s", priv_aa->description, priv_ab->description);
+        PWARN ("descriptions differ: %s vs %s", priv_aa->description.c_str(),
+               priv_ab->description.c_str());
         return FALSE;
     }
 
@@ -1948,7 +1944,7 @@ gnc_account_insert_split (Account *acc, Split *s)
     g_return_val_if_fail(GNC_IS_SPLIT(s), FALSE);
 
     priv = GET_PRIVATE(acc);
-    if (!g_hash_table_add (priv->splits_hash, s))
+    if (!priv->splits_set.insert (s).second)
         return false;
 
     priv->splits.push_back (s);
@@ -1979,7 +1975,7 @@ gnc_account_remove_split (Account *acc, Split *s)
 
     priv = GET_PRIVATE(acc);
 
-    if (!g_hash_table_remove (priv->splits_hash, s))
+    if (!priv->splits_set.erase (s))
         return false;
 
     // shortcut pruning the last element. this is the most common
@@ -2118,6 +2114,15 @@ gnc_account_set_policy (Account *acc, GNCPolicy *policy)
 /********************************************************************\
 \********************************************************************/
 
+/* Drop the first occurrence of lot from the account's lots. */
+static void
+remove_lot (AccountPrivate *priv, GNCLot *lot)
+{
+    auto it{std::find (priv->lots.begin(), priv->lots.end(), lot)};
+    if (it != priv->lots.end())
+        priv->lots.erase (it);
+}
+
 void
 xaccAccountRemoveLot (Account *acc, GNCLot *lot)
 {
@@ -2127,10 +2132,10 @@ xaccAccountRemoveLot (Account *acc, GNCLot *lot)
     g_return_if_fail(GNC_IS_LOT(lot));
 
     priv = GET_PRIVATE(acc);
-    g_return_if_fail(priv->lots);
+    g_return_if_fail(!priv->lots.empty());
 
     ENTER ("(acc=%p, lot=%p)", acc, lot);
-    priv->lots = g_list_remove(priv->lots, lot);
+    remove_lot (priv, lot);
     qof_event_gen (QOF_INSTANCE(lot), QOF_EVENT_REMOVE, nullptr);
     qof_event_gen (&acc->inst, QOF_EVENT_MODIFY, nullptr);
     LEAVE ("(acc=%p, lot=%p)", acc, lot);
@@ -2154,12 +2159,12 @@ xaccAccountInsertLot (Account *acc, GNCLot *lot)
     if (lot_acc)
     {
         auto priv = GET_PRIVATE(lot_acc);
-        priv->lots = g_list_remove(priv->lots, lot);
+        remove_lot (priv, lot);
         qof_event_gen (&lot_acc->inst, QOF_EVENT_MODIFY, nullptr);
     }
 
     auto priv = GET_PRIVATE(acc);
-    priv->lots = g_list_prepend(priv->lots, lot);
+    priv->lots.insert (priv->lots.begin(), lot);
     gnc_lot_set_account(lot, acc);
 
     /* Don't move the splits to the new account.  The caller will do this
@@ -2235,7 +2240,7 @@ xaccAccountMoveAllSplits (Account *accfrom, Account *accto)
 
     /* Finally empty accfrom. */
     g_assert(from_priv->splits.empty());
-    g_assert(from_priv->lots == nullptr);
+    g_assert(from_priv->lots.empty());
     xaccAccountCommitEdit(accfrom);
     xaccAccountCommitEdit(accto);
 
@@ -2289,7 +2294,7 @@ xaccAccountRecomputeBalance (Account * acc)
     auto has_stock_split    = false;
 
     PINFO ("acct=%s starting baln=%" G_GINT64_FORMAT "/%" G_GINT64_FORMAT,
-           priv->accountName, balance.num, balance.denom);
+           priv->accountName.c_str(), balance.num, balance.denom);
     for (auto split : priv->splits)
     {
         auto amt = xaccSplitGetAmount (split);
@@ -2375,7 +2380,6 @@ int
 xaccAccountOrder (const Account *aa, const Account *ab)
 {
     AccountPrivate *priv_aa, *priv_ab;
-    const char *da, *db;
     int ta, tb, result;
 
     if (aa == ab) return 0;
@@ -2386,11 +2390,7 @@ xaccAccountOrder (const Account *aa, const Account *ab)
     priv_ab = GET_PRIVATE(ab);
 
     /* sort on accountCode strings */
-    da = priv_aa->accountCode;
-    db = priv_ab->accountCode;
-
-    /* Otherwise do a string sort */
-    result = g_strcmp0 (da, db);
+    result = priv_aa->accountCode.compare (priv_ab->accountCode);
     if (result)
         return result;
 
@@ -2414,9 +2414,8 @@ xaccAccountOrder (const Account *aa, const Account *ab)
     if (ta > tb) return +1;
 
     /* otherwise, sort on accountName strings */
-    da = priv_aa->accountName;
-    db = priv_ab->accountName;
-    result = safe_utf8_collate(da, db);
+    result = safe_utf8_collate(priv_aa->accountName.c_str(),
+                               priv_ab->accountName.c_str());
     if (result)
         return result;
 
@@ -2465,11 +2464,11 @@ xaccAccountSetName (Account *acc, const char *str)
 
     /* optimizations */
     priv = GET_PRIVATE(acc);
-    if (g_strcmp0(str, priv->accountName) == 0)
+    if (priv->accountName == str)
         return;
 
     xaccAccountBeginEdit(acc);
-    priv->accountName = qof_string_cache_replace(priv->accountName, str);
+    priv->accountName = str;
     mark_account (acc);
     xaccAccountCommitEdit(acc);
 }
@@ -2484,11 +2483,11 @@ xaccAccountSetCode (Account *acc, const char *str)
 
     /* optimizations */
     priv = GET_PRIVATE(acc);
-    if (g_strcmp0(str, priv->accountCode) == 0)
+    if (priv->accountCode == (str ? str : ""))
         return;
 
     xaccAccountBeginEdit(acc);
-    priv->accountCode = qof_string_cache_replace(priv->accountCode, str ? str : "");
+    priv->accountCode = str ? str : "";
     mark_account (acc);
     xaccAccountCommitEdit(acc);
 }
@@ -2503,11 +2502,11 @@ xaccAccountSetDescription (Account *acc, const char *str)
 
     /* optimizations */
     priv = GET_PRIVATE(acc);
-    if (g_strcmp0(str, priv->description) == 0)
+    if (priv->description == (str ? str : ""))
         return;
 
     xaccAccountBeginEdit(acc);
-    priv->description = qof_string_cache_replace(priv->description, str ? str : "");
+    priv->description = str ? str : "";
     mark_account (acc);
     xaccAccountCommitEdit(acc);
 }
@@ -3138,7 +3137,7 @@ gnc_account_lookup_by_full_name_helper (const Account *parent,
     for (auto account : GET_PRIVATE(parent)->children)
     {
         auto priv = GET_PRIVATE(account);
-        if (g_strcmp0(priv->accountName, names[0]) == 0)
+        if (priv->accountName == names[0])
         {
             /* We found an account.  If the next entry is nullptr, there is
              * nothing left in the name, so just return the account. */
@@ -3289,7 +3288,7 @@ const char *
 xaccAccountGetName (const Account *acc)
 {
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
-    return GET_PRIVATE(acc)->accountName;
+    return GET_PRIVATE(acc)->accountName.c_str();
 }
 
 std::vector<const Account*>
@@ -3336,14 +3335,14 @@ const char *
 xaccAccountGetCode (const Account *acc)
 {
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
-    return GET_PRIVATE(acc)->accountCode;
+    return GET_PRIVATE(acc)->accountCode.c_str();
 }
 
 const char *
 xaccAccountGetDescription (const Account *acc)
 {
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
-    return GET_PRIVATE(acc)->description;
+    return GET_PRIVATE(acc)->description.c_str();
 }
 
 const char *
@@ -3975,7 +3974,9 @@ LotList *
 xaccAccountGetLotList (const Account *acc)
 {
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
-    return g_list_copy(GET_PRIVATE(acc)->lots);
+    auto& lots{GET_PRIVATE(acc)->lots};
+    return std::accumulate (lots.rbegin(), lots.rend(),
+                            static_cast<GList*>(nullptr), g_list_prepend);
 }
 
 LotList *
@@ -3985,16 +3986,13 @@ xaccAccountFindOpenLots (const Account *acc,
                          gpointer user_data, GCompareFunc sort_func)
 {
     AccountPrivate *priv;
-    GList *lot_list;
     GList *retval = nullptr;
 
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
 
     priv = GET_PRIVATE(acc);
-    for (lot_list = priv->lots; lot_list; lot_list = lot_list->next)
+    for (auto lot : priv->lots)
     {
-        GNCLot *lot = static_cast<GNCLot*>(lot_list->data);
-
         /* If this lot is closed, then ignore it */
         if (gnc_lot_is_closed (lot))
             continue;
@@ -4019,8 +4017,8 @@ xaccAccountForEachLot(const Account *acc,
     g_return_val_if_fail(GNC_IS_ACCOUNT(acc), nullptr);
     g_return_val_if_fail(proc, nullptr);
 
-    for (auto node = GET_PRIVATE(acc)->lots; node; node = node->next)
-        if (auto result = proc(GNC_LOT(node->data), data))
+    for (auto lot : GET_PRIVATE(acc)->lots)
+        if (auto result = proc(lot, data))
             return result;
 
     return nullptr;
@@ -4963,11 +4961,11 @@ gnc_account_merge_children (Account *parent)
         {
             auto acc_b = *it_b;
             auto priv_b = GET_PRIVATE(acc_b);
-            if (0 != null_strcmp(priv_a->accountName, priv_b->accountName))
+            if (priv_a->accountName != priv_b->accountName)
                 continue;
-            if (0 != null_strcmp(priv_a->accountCode, priv_b->accountCode))
+            if (priv_a->accountCode != priv_b->accountCode)
                 continue;
-            if (0 != null_strcmp(priv_a->description, priv_b->description))
+            if (priv_a->description != priv_b->description)
                 continue;
             if (0 != null_strcmp(xaccAccountGetColor(acc_a),
                                  xaccAccountGetColor(acc_b)))

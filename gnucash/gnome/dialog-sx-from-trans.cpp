@@ -45,6 +45,7 @@
 #include "SchedXaction.hpp"
 #include "SX-book.h"
 #include "SX-ttinfo.hpp"
+#include <Transaction.hpp>
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 #include <stdlib.h>
@@ -208,7 +209,6 @@ sxftd_add_template_trans(SXFromTransInfo *sxfti)
 {
 
     Transaction *tr = sxfti->trans;
-    GList *splits = NULL;
     TTInfoPtr tti = std::make_shared<TTInfo>();
     TTSplitInfoPtr ttsi;
     gnc_numeric runningBalance;
@@ -224,9 +224,8 @@ sxftd_add_template_trans(SXFromTransInfo *sxfti)
 
     tti->clear_template_splits ();
 
-    for (splits = xaccTransGetSplitList(tr); splits; splits = splits->next)
+    for (auto sp : xaccTransGetSplits (tr))
     {
-        auto sp = GNC_SPLIT(splits->data);
         ttsi = std::make_shared<TTSplitInfo>();
         ttsi->set_action (gnc_get_num_action(NULL, sp));
         split_value = xaccSplitGetValue(sp);

@@ -330,7 +330,6 @@ xaccScrubMergeSubSplits (Split *split, gboolean strict)
 {
     gboolean rc = FALSE;
     Transaction *txn;
-    SplitList *node;
     GNCLot *lot;
 
     if (strict && (FALSE == is_subsplit (split))) return FALSE;
@@ -345,9 +344,8 @@ xaccScrubMergeSubSplits (Split *split, gboolean strict)
 
     ENTER ("(Lot=%s)", gnc_lot_get_title(lot));
 restart:
-    for (node = txn->splits; node; node = node->next)
+    for (auto s : txn->splits)
     {
-        Split *s = GNC_SPLIT(node->data);
         if (xaccSplitGetLot (s) != lot) continue;
         if (s == split) continue;
         if (qof_instance_get_destroying(s)) continue;

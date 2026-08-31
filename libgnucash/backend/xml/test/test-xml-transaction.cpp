@@ -43,6 +43,7 @@
 #include <AccountP.hpp>
 #include <Transaction.h>
 #include <TransactionP.hpp>
+#include <Transaction.hpp>
 
 #include "../gnc-xml-helper.h"
 #include "../gnc-xml.h"
@@ -379,12 +380,11 @@ test_transaction (void)
         }
 
         {
-            /* xaccAccountInsertSplit can reorder the splits. */
-            GList* list = g_list_copy (xaccTransGetSplitList (ran_trn));
-            GList* node = list;
-            for (; node; node = node->next)
+            /* xaccAccountInsertSplit can reorder the splits, so iterate
+               over a copy. */
+            const SplitsVec list{xaccTransGetSplits (ran_trn)};
+            for (auto s : list)
             {
-                Split* s = static_cast<decltype (s)> (node->data);
                 Account* a = xaccMallocAccount (book);
 
                 xaccAccountBeginEdit (a);
@@ -393,7 +393,6 @@ test_transaction (void)
                 xaccAccountInsertSplit (a, s);
                 xaccAccountCommitEdit (a);
             }
-            g_list_free (list);
         }
 
         com = xaccTransGetCurrency (ran_trn);
@@ -433,10 +432,8 @@ test_transaction (void)
         close (fd);
 
         {
-            GList* node = xaccTransGetSplitList (ran_trn);
-            for (; node; node = node->next)
+            for (auto s : xaccTransGetSplits (ran_trn))
             {
-                Split* s = static_cast<decltype (s)> (node->data);
                 Account* a1 = xaccSplitGetAccount (s);
                 Account* a2 = xaccMallocAccount (book);
 

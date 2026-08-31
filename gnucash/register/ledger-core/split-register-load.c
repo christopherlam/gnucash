@@ -220,7 +220,8 @@ gnc_split_register_add_transaction (SplitRegister* reg,
 
     /* Continue setting up virtual cells in a column, using a row for each
      * split in the transaction. */
-    for (node = xaccTransGetSplitList (trans); node; node = node->next)
+    GList *splits = xaccTransGetSplitList (trans);
+    for (node = splits; node; node = node->next)
     {
         Split* secondary = node->data;
 
@@ -233,6 +234,7 @@ gnc_split_register_add_transaction (SplitRegister* reg,
                              visible_splits, TRUE, *vcell_loc);
         vcell_loc->virt_row++;
     }
+    g_list_free (splits);
 
     /* If requested, add an empty split row at the end. */
     if (add_empty)
@@ -269,7 +271,8 @@ add_quickfill_completions (TableLayout* layout, Transaction* trans,
             (NumCell*) gnc_table_layout_get_cell (layout, NUM_CELL),
             gnc_get_num_action (trans, split));
 
-    for (GList *n = xaccTransGetSplitList (trans); n; n = n->next)
+    GList *splits = xaccTransGetSplitList (trans);
+    for (GList *n = splits; n; n = n->next)
     {
         Split *s = n->data;
 
@@ -280,6 +283,7 @@ add_quickfill_completions (TableLayout* layout, Transaction* trans,
             (QuickFillCell*) gnc_table_layout_get_cell (layout, MEMO_CELL),
             xaccSplitGetMemo (s));
     }
+    g_list_free (splits);
 }
 
 static Split*
@@ -596,7 +600,8 @@ gnc_split_register_load (SplitRegister* reg, GList* slist,
     // list we're about to load.
     if (pending_trans != NULL)
     {
-        for (node = xaccTransGetSplitList (pending_trans); node; node = node->next)
+        GList *pending_splits = xaccTransGetSplitList (pending_trans);
+        for (node = pending_splits; node; node = node->next)
         {
             Split* pending_split = (Split*)node->data;
             if (!xaccTransStillHasSplit (pending_trans, pending_split)) continue;
@@ -615,6 +620,7 @@ gnc_split_register_load (SplitRegister* reg, GList* slist,
             }
             slist = g_list_append (slist, pending_split);
         }
+        g_list_free (pending_splits);
     }
 
     if (multi_line)
