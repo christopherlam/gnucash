@@ -30,6 +30,7 @@
 #include <cstring>
 #include <cstdint>
 #include <sstream>
+#include <concepts>
 #include <ctre.hpp>
 #include <boost/locale/encoding_utf.hpp>
 
@@ -136,10 +137,27 @@ operator+(const ctll::fixed_string<N>& a, const ctll::fixed_string<M>& b)
 }
 
 static std::string
-to_std_string(std::u32string_view v)
+to_std_string(std::u8string_view v)
 {
-    return boost::locale::conv::utf_to_utf<char>(v.data(), v.data() + v.size());
+    return std::string(reinterpret_cast<const char*>(v.data()), v.size());
 }
+
+/* A ctre::regex_results-like match/capture object: contextually
+ * convertible to bool (whether it matched) and readable as text via
+ * to_string(). Used to constrain the template helpers below, which are
+ * instantiated with several different ctre pattern types.
+ */
+template <typename M>
+concept CtreCapture = requires(const M& m) {
+    { static_cast<bool>(m) } -> std::convertible_to<bool>;
+    { m.to_string() } -> std::convertible_to<std::string>;
+};
+
+template <typename M>
+concept CtreMatchResult = requires(const M& m) {
+    { static_cast<bool>(m) } -> std::convertible_to<bool>;
+    { m.template get<0>() } -> CtreCapture;
+};
 } // anonymous namespace
 
 static std::pair<int64_t, int64_t>
@@ -190,7 +208,7 @@ numeric_from_decimal_match(const std::string& integer, const std::string& decima
     return std::make_pair(n, d);
 }
 
-template <typename Match>
+template <CtreMatchResult Match>
 static std::pair<GncInt128, GncInt128>
 numeric_from_scientific_match(Match &m)
 {
@@ -374,8 +392,8 @@ GncNumeric::GncNumeric(const std::string &str, bool autoround) {
         m_den = denom;
         return;
     }
-    if (auto u32str = boost::locale::conv::utf_to_utf<char32_t>(str);
-        auto m = ctre::search<sep_decimal>(u32str))
+    if (auto m = ctre::search<sep_decimal>(
+            std::u8string_view(reinterpret_cast<const char8_t*>(str.data()), str.size())))
     {
         /* There's a bit of magic here because of the complexity of
          * the regex. It supports two formats, one for locales that

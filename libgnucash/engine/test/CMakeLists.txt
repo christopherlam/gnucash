@@ -1,5 +1,11 @@
 # Common stuff
 
+# gnc-numeric.cpp's ctre-based decimal-separator matching uses char8_t /
+# std::u8string_view, which need C++20; every test target below that
+# recompiles it from source needs the same override as the main library.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/libgnucash/engine/gnc-numeric.cpp
+  PROPERTIES COMPILE_OPTIONS "-std=c++20;-Wno-error=deprecated-enum-enum-conversion")
+
 set(ENGINE_TEST_INCLUDE_DIRS
   ${CMAKE_SOURCE_DIR}/libgnucash/backend/xml
   ${CMAKE_SOURCE_DIR}/libgnucash/engine
