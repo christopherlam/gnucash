@@ -87,6 +87,11 @@ if (WIN32)
   add_definitions(-DOS_WIN32)
 endif()
 
+# gnc-numeric.cpp's ctre-based decimal-separator matching uses char8_t /
+# std::u8string_view, which need C++20; see libgnucash/engine/CMakeLists.txt.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/libgnucash/engine/gnc-numeric.cpp
+  PROPERTIES COMPILE_OPTIONS "-std=c++20;-Wno-error=deprecated-enum-enum-conversion")
+
 gnc_add_test(test-import-backend "${gtest_import_backend_SOURCES}"
   gtest_import_backend_INCLUDE_DIRS gtest_import_backend_LIBS)
 

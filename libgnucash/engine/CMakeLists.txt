@@ -231,6 +231,11 @@ target_sources(gnc-engine
         $<$<BOOL:${WIN32}>:${CMAKE_SOURCE_DIR}/borrowed/libc/strptime.c>
 )
 
+# gnc-numeric.cpp's ctre-based decimal-separator matching uses char8_t /
+# std::u8string_view, which need C++20; the rest of the project (and the
+# rest of this target) still builds as C++17.
+set_source_files_properties(gnc-numeric.cpp PROPERTIES COMPILE_OPTIONS "-std=c++20;-Wno-error=deprecated-enum-enum-conversion")
+
 # Add dependency on iso-4217-currencies.c
 add_dependencies (gnc-engine iso-4217-c)
 
