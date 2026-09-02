@@ -25,6 +25,8 @@
 
 #include <config.h>
 
+#include <string>
+
 #include "gnc-ui-balances.h"
 #include "gnc-ui-util.h"
 
@@ -507,47 +509,51 @@ gnc_ui_account_get_balance_assertion_explanation (const Account *account)
 {
     g_return_val_if_fail (GNC_IS_ACCOUNT (account), nullptr);
 
-    GList *all = gnc_balance_assertion_get_for_account (account);
+    auto all = gnc_balance_assertion_get_for_account (account);
     if (!all)
         return nullptr;
-
-    GString *str = g_string_new (nullptr);
-    guint failing = 0;
 
     /* Newest first: the most recent statement is the one the user is
      * most likely to be looking for. */
     all = g_list_reverse (all);
 
-    for (GList *n = all; n; n = n->next)
+    auto describe = [](GncBalanceAssertion *ba)
     {
-        GncBalanceAssertion *ba = GNC_BALANCE_ASSERTION (n->data);
+        auto line = gnc_ui_balance_assertion_get_description (ba);
+        std::string rv {line ? line : ""};
+        g_free (line);
+        return rv;
+    };
+
+    static constexpr unsigned max_listed = 3;
+    std::string text;
+    unsigned failing = 0;
+
+    for (auto n = all; n; n = n->next)
+    {
+        auto ba = GNC_BALANCE_ASSERTION (n->data);
 
         if (!gnc_balance_assertion_is_failing (ba))
             continue;
 
-        if (failing++ == 3)
+        if (failing++ == max_listed)
         {
-            g_string_append (str, "\n…");
+            text += "\n…";
             break;
         }
 
-        char *line = gnc_ui_balance_assertion_get_description (ba);
-        if (str->len)
-            g_string_append_c (str, '\n');
-        g_string_append (str, line);
-        g_free (line);
+        if (!text.empty())
+            text += '\n';
+        text += describe (ba);
     }
 
+    /* Nothing is failing: say so for the most recent assertion, so the
+     * tick in the account tree has something to explain it. */
     if (!failing)
-    {
-        char *line = gnc_ui_balance_assertion_get_description
-            (GNC_BALANCE_ASSERTION (all->data));
-        g_string_append (str, line);
-        g_free (line);
-    }
+        text = describe (GNC_BALANCE_ASSERTION (all->data));
 
     g_list_free (all);
-    return g_string_free (str, FALSE);
+    return g_strdup (text.c_str());
 }
 
 /********************************************************************

@@ -25,10 +25,6 @@
 #include <gtk/gtk.h>
 #include "Account.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /** Show the balance assertions for @a account, and let the user add or
  *  remove them.  If a dialog is already open for the account it is
  *  raised instead of a second one being created.
@@ -46,9 +42,5 @@ void gnc_balance_assertion_dialog (GtkWindow *parent, Account *account);
 void gnc_balance_assertion_dialog_for_date (GtkWindow *parent,
                                             Account *account,
                                             time64 date);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* DIALOG_BALANCE_ASSERTION_H */

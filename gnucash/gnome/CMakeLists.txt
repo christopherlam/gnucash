@@ -76,7 +76,7 @@ set (gnc_gnome_SOURCES
   business-options-gnome.cpp
   business-urls.c
   business-gnome-utils.c
-  dialog-balance-assertion.c
+  dialog-balance-assertion.cpp
   dialog-doclink.c
   dialog-billterms.c
   dialog-choose-owner.c

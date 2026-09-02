@@ -61,7 +61,7 @@ gnucash/gnome/assistant-stock-transaction.cpp
 gnucash/gnome/business-gnome-utils.c
 gnucash/gnome/business-options-gnome.cpp
 gnucash/gnome/business-urls.c
-gnucash/gnome/dialog-balance-assertion.c
+gnucash/gnome/dialog-balance-assertion.cpp
 gnucash/gnome/dialog-billterms.c
 gnucash/gnome/dialog-choose-owner.c
 gnucash/gnome/dialog-commodities.cpp
