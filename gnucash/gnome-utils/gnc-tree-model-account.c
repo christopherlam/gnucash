@@ -374,6 +374,8 @@ gnc_tree_model_account_get_column_type (GtkTreeModel *tree_model, int index)
     case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_PERIOD:
     case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_LIMIT:
     case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_LIMIT_EXPLANATION:
+    case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION:
+    case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION_EXPLANATION:
     case GNC_TREE_MODEL_ACCOUNT_COL_CLEARED:
     case GNC_TREE_MODEL_ACCOUNT_COL_CLEARED_REPORT:
     case GNC_TREE_MODEL_ACCOUNT_COL_RECONCILED:
@@ -803,6 +805,18 @@ gnc_tree_model_account_get_value (GtkTreeModel *tree_model,
     case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_LIMIT_EXPLANATION:
         g_value_init (value, G_TYPE_STRING);
         string = gnc_ui_account_get_balance_limit_explanation (account);
+        g_value_take_string (value, string);
+        break;
+
+    case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION:
+        g_value_init (value, G_TYPE_STRING);
+        string = gnc_ui_account_get_balance_assertion_icon_name (account);
+        g_value_take_string (value, string);
+        break;
+
+    case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION_EXPLANATION:
+        g_value_init (value, G_TYPE_STRING);
+        string = gnc_ui_account_get_balance_assertion_explanation (account);
         g_value_take_string (value, string);
         break;
 

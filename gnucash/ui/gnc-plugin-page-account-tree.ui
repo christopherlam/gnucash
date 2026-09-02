@@ -158,6 +158,12 @@
       <attribute name="tooltip" translatable="yes">Bring up the lot viewer/editor window</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
+    <item>
+      <attribute name="label" translatable="yes">_Balance Assertions…</attribute>
+      <attribute name="action">GncPluginPageAccountTreeActions.ActionsBalanceAssertionsAction</attribute>
+      <attribute name="tooltip" translatable="yes">Record and review what this account's balance should be on given dates</attribute>
+      <attribute name="temp" translatable="no">yes</attribute>
+    </item>
   </menu>
 
   <menu id="ActionsPlaceholder6">
@@ -259,6 +265,11 @@
         <attribute name="label" translatable="yes">View _Lots…</attribute>
         <attribute name="action">GncPluginPageAccountTreeActions.ActionsLotsAction</attribute>
         <attribute name="tooltip" translatable="yes">Bring up the lot viewer/editor window</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_Balance Assertions…</attribute>
+        <attribute name="action">GncPluginPageAccountTreeActions.ActionsBalanceAssertionsAction</attribute>
+        <attribute name="tooltip" translatable="yes">Record and review what this account's balance should be on given dates</attribute>
       </item>
     </section>
     <section>

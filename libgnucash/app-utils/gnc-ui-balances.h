@@ -31,6 +31,7 @@
 #include <glib.h>
 
 #include "Account.h"
+#include "gnc-balance-assertion.h"
 #include "gncOwner.h"
 #include "qof.h"
 
@@ -191,6 +192,48 @@ gchar * gnc_ui_account_get_balance_limit_icon_name (const Account *account);
  *  are no limits, or balance is within limits.
  */
 gchar * gnc_ui_account_get_balance_limit_explanation (const Account *account);
+
+/** Summarise the state of the account's balance assertions as an icon
+ *  name for the account tree.
+ *
+ *  @param account A pointer to the account.
+ *
+ *  @return A newly allocated icon name: a warning if any assertion on
+ *  the account is failing, a tick if the account has assertions and
+ *  they all hold, and the empty string if it has none.  Never NULL.
+ */
+gchar * gnc_ui_account_get_balance_assertion_icon_name (const Account *account);
+
+/** Explain the state of the account's balance assertions, for use as a
+ *  tooltip.  Amounts are presented with the sign convention the user
+ *  sees in the register, i.e. reversed where gnc_reverse_balance()
+ *  says so.
+ *
+ *  @param account A pointer to the account.
+ *
+ *  @return A newly allocated explanation, or NULL if the account has no
+ *  balance assertions.
+ */
+gchar * gnc_ui_account_get_balance_assertion_explanation (const Account *account);
+
+/** Format one assertion for display, e.g. for a list in a dialog.
+ *
+ *  @param ba The assertion.
+ *
+ *  @return A newly allocated one-line description of what the assertion
+ *  claims and what the book actually holds.
+ */
+gchar * gnc_ui_balance_assertion_get_description (const GncBalanceAssertion *ba);
+
+/** The asserted amount with the user-facing sign convention applied, so
+ *  that it can be shown in, or read out of, an entry field alongside
+ *  register balances. */
+gnc_numeric gnc_ui_balance_assertion_get_display_amount (const GncBalanceAssertion *ba);
+
+/** The inverse of gnc_ui_balance_assertion_get_display_amount(): store
+ *  an amount the user typed, undoing the display sign convention. */
+void gnc_ui_balance_assertion_set_display_amount (GncBalanceAssertion *ba,
+                                                  gnc_numeric amount);
 
 #ifdef __cplusplus
 }

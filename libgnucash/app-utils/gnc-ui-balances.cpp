@@ -406,6 +406,151 @@ gnc_ui_account_get_balance_limit_explanation (const Account *account)
 }
 
 /********************************************************************
+ * Balance assertions
+ ********************************************************************/
+
+/* Assertions are stored with the engine's internal sign; the user
+ * entered, and expects to read back, whatever the register shows. */
+gnc_numeric
+gnc_ui_balance_assertion_get_display_amount (const GncBalanceAssertion *ba)
+{
+    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), gnc_numeric_zero ());
+
+    gnc_numeric amount = gnc_balance_assertion_get_amount (ba);
+    Account *acc = gnc_balance_assertion_get_account (ba);
+
+    return (acc && gnc_reverse_balance (acc)) ? gnc_numeric_neg (amount) : amount;
+}
+
+void
+gnc_ui_balance_assertion_set_display_amount (GncBalanceAssertion *ba,
+                                             gnc_numeric amount)
+{
+    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+
+    Account *acc = gnc_balance_assertion_get_account (ba);
+    if (acc && gnc_reverse_balance (acc))
+        amount = gnc_numeric_neg (amount);
+
+    gnc_balance_assertion_set_amount (ba, amount);
+}
+
+static gnc_numeric
+assertion_display_actual (const GncBalanceAssertion *ba)
+{
+    gnc_numeric actual = gnc_balance_assertion_get_actual (ba);
+    Account *acc = gnc_balance_assertion_get_account (ba);
+
+    return (acc && gnc_reverse_balance (acc)) ? gnc_numeric_neg (actual) : actual;
+}
+
+gchar *
+gnc_ui_balance_assertion_get_description (const GncBalanceAssertion *ba)
+{
+    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), nullptr);
+
+    Account *acc = gnc_balance_assertion_get_account (ba);
+    if (!acc)
+        return g_strdup (_("This balance assertion refers to an account that "
+                           "no longer exists."));
+
+    GNCPrintAmountInfo pinfo =
+        gnc_commodity_print_info (xaccAccountGetCommodity (acc), TRUE);
+    char datebuf[MAX_DATE_LENGTH + 1];
+    qof_print_date_buff (datebuf, MAX_DATE_LENGTH,
+                         gnc_balance_assertion_get_date (ba));
+
+    char *asserted = g_strdup (xaccPrintAmount
+                               (gnc_ui_balance_assertion_get_display_amount (ba),
+                                pinfo));
+    char *rv;
+
+    if (gnc_balance_assertion_get_status (ba) == GNC_BALANCE_ASSERTION_PASS)
+        rv = g_strdup_printf (_("Balance on %s is %s, as asserted."),
+                              datebuf, asserted);
+    else
+    {
+        char *actual = g_strdup (xaccPrintAmount (assertion_display_actual (ba),
+                                                  pinfo));
+        rv = g_strdup_printf (_("Balance on %s is %s but %s was asserted."),
+                              datebuf, actual, asserted);
+        g_free (actual);
+    }
+
+    g_free (asserted);
+    return rv;
+}
+
+gchar *
+gnc_ui_account_get_balance_assertion_icon_name (const Account *account)
+{
+    g_return_val_if_fail (GNC_IS_ACCOUNT (account), g_strdup (""));
+
+    GList *all = gnc_balance_assertion_get_for_account (account);
+    if (!all)
+        return g_strdup ("");
+
+    gboolean failing = FALSE;
+    for (GList *n = all; n && !failing; n = n->next)
+        failing = gnc_balance_assertion_is_failing (GNC_BALANCE_ASSERTION (n->data));
+
+    g_list_free (all);
+
+    /* A failing assertion is worth a warning triangle; a passing one is
+     * worth the reassurance of a tick, and nothing else. Neither
+     * prevents the user from doing anything. */
+    return g_strdup (failing ? "dialog-warning" : "emblem-default");
+}
+
+gchar *
+gnc_ui_account_get_balance_assertion_explanation (const Account *account)
+{
+    g_return_val_if_fail (GNC_IS_ACCOUNT (account), nullptr);
+
+    GList *all = gnc_balance_assertion_get_for_account (account);
+    if (!all)
+        return nullptr;
+
+    GString *str = g_string_new (nullptr);
+    guint failing = 0;
+
+    /* Newest first: the most recent statement is the one the user is
+     * most likely to be looking for. */
+    all = g_list_reverse (all);
+
+    for (GList *n = all; n; n = n->next)
+    {
+        GncBalanceAssertion *ba = GNC_BALANCE_ASSERTION (n->data);
+
+        if (!gnc_balance_assertion_is_failing (ba))
+            continue;
+
+        if (failing++ == 3)
+        {
+            g_string_append (str, "\n…");
+            break;
+        }
+
+        char *line = gnc_ui_balance_assertion_get_description (ba);
+        if (str->len)
+            g_string_append_c (str, '\n');
+        g_string_append (str, line);
+        g_free (line);
+    }
+
+    if (!failing)
+    {
+        char *line = gnc_ui_balance_assertion_get_description
+            (GNC_BALANCE_ASSERTION (all->data));
+        g_string_append (str, line);
+        g_free (line);
+    }
+
+    g_list_free (all);
+    return g_string_free (str, FALSE);
+}
+
+/********************************************************************
  * Balance calculations related to owners
  ********************************************************************/
 
