@@ -53,6 +53,7 @@ static const EntryVec col_table
                                             "account"),
     gnc_sql_make_table_entry<CT_TIME>("date", 0, COL_NNUL, "date"),
     gnc_sql_make_table_entry<CT_NUMERIC>("amount", 0, COL_NNUL, "amount"),
+    gnc_sql_make_table_entry<CT_INT>("basis", 0, COL_NNUL, "basis"),
     gnc_sql_make_table_entry<CT_STRING>("notes", BA_MAX_NOTES_LEN, 0, "notes"),
 });
 

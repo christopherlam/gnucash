@@ -467,15 +467,26 @@ gnc_ui_balance_assertion_get_description (const GncBalanceAssertion *ba)
                                 pinfo));
     char *rv;
 
+    /* Two wordings rather than a substituted noun, so that translators
+     * see each sentence whole. */
+    auto reconciled_basis =
+        gnc_balance_assertion_get_basis (ba) == GNC_BALANCE_ASSERTION_BASIS_RECONCILED;
+
     if (gnc_balance_assertion_get_status (ba) == GNC_BALANCE_ASSERTION_PASS)
-        rv = g_strdup_printf (_("Balance on %s is %s, as asserted."),
-                              datebuf, asserted);
+        rv = reconciled_basis
+            ? g_strdup_printf (_("Reconciled balance on %s is %s, as asserted."),
+                               datebuf, asserted)
+            : g_strdup_printf (_("Balance on %s is %s, as asserted."),
+                               datebuf, asserted);
     else
     {
         char *actual = g_strdup (xaccPrintAmount (assertion_display_actual (ba),
                                                   pinfo));
-        rv = g_strdup_printf (_("Balance on %s is %s but %s was asserted."),
-                              datebuf, actual, asserted);
+        rv = reconciled_basis
+            ? g_strdup_printf (_("Reconciled balance on %s is %s but %s was "
+                                 "asserted."), datebuf, actual, asserted)
+            : g_strdup_printf (_("Balance on %s is %s but %s was asserted."),
+                               datebuf, actual, asserted);
         g_free (actual);
     }
 

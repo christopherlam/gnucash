@@ -13,6 +13,8 @@
       <column type="gchararray"/>
       <!-- column-name difference -->
       <column type="gchararray"/>
+      <!-- column-name basis -->
+      <column type="gchararray"/>
       <!-- column-name status_icon -->
       <column type="gchararray"/>
       <!-- column-name notes -->
@@ -162,6 +164,37 @@
               </packing>
             </child>
             <child>
+              <object class="GtkLabel" id="ba_basis_label">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="label" translatable="yes">Balance _of</property>
+                <property name="use-underline">True</property>
+                <property name="mnemonic-widget">ba_basis_combo</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkComboBoxText" id="ba_basis_combo">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="active">0</property>
+                <property name="tooltip-text" translatable="yes">Which balance the figure is: everything posted on or before the date, or only what had been reconciled by then.</property>
+                <items>
+                  <item id="total" translatable="yes">Everything posted</item>
+                  <item id="reconciled" translatable="yes">Reconciled only</item>
+                </items>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">1</property>
+                <property name="width">3</property>
+              </packing>
+            </child>
+            <child>
               <object class="GtkLabel" id="ba_notes_label">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
@@ -172,7 +205,7 @@
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">1</property>
+                <property name="top-attach">2</property>
               </packing>
             </child>
             <child>
@@ -184,7 +217,7 @@
               </object>
               <packing>
                 <property name="left-attach">1</property>
-                <property name="top-attach">1</property>
+                <property name="top-attach">2</property>
                 <property name="width">3</property>
               </packing>
             </child>
@@ -230,7 +263,7 @@
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">2</property>
+                <property name="top-attach">3</property>
                 <property name="width">4</property>
               </packing>
             </child>

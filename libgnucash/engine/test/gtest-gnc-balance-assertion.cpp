@@ -79,8 +79,9 @@ protected:
         return acc;
     }
 
-    /* Post `amount' into m_bank from m_income on `date'. */
-    void add_transaction (time64 date, gnc_numeric amount)
+    /* Post `amount' into m_bank from m_income on `date'. Returns the
+     * bank-side split, so a test can reconcile it. */
+    Split *add_transaction (time64 date, gnc_numeric amount)
     {
         Transaction *trans = xaccMallocTransaction (m_book);
         xaccTransBeginEdit (trans);
@@ -99,6 +100,19 @@ protected:
         xaccSplitSetValue (from, gnc_numeric_neg (amount));
         xaccSplitSetAmount (from, gnc_numeric_neg (amount));
 
+        xaccTransCommitEdit (trans);
+
+        return to;
+    }
+
+    /* Mark a split reconciled as the reconcile window does: state 'y',
+     * with the *statement* date as the split's reconcile date. */
+    void reconcile_split (Split *split, time64 statement_date)
+    {
+        auto trans = xaccSplitGetParent (split);
+        xaccTransBeginEdit (trans);
+        xaccSplitSetReconcile (split, YREC);
+        xaccSplitSetDateReconciledSecs (split, statement_date);
         xaccTransCommitEdit (trans);
     }
 
@@ -281,4 +295,98 @@ TEST_F (BalanceAssertionTest, DeletingTheAccountRemovesItsAssertions)
                    (GNC_BALANCE_ASSERTION (remaining->data)));
     }
     g_list_free (remaining);
+}
+
+/* ================================================================ */
+/* Reconciled basis */
+
+TEST_F (BalanceAssertionTest, BasisDefaultsToTotalAndRoundTrips)
+{
+    auto ba = make_assertion (m_bank, JAN_15, dollars (50));
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_BASIS_TOTAL,
+               gnc_balance_assertion_get_basis (ba));
+
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_BASIS_RECONCILED,
+               gnc_balance_assertion_get_basis (ba));
+}
+
+TEST_F (BalanceAssertionTest, ReconciledBasisCountsOnlyReconciledSplits)
+{
+    auto reconciled = add_transaction (JAN_15, dollars (50));
+    add_transaction (JAN_15, dollars (30));      /* left unreconciled */
+    reconcile_split (reconciled, JAN_15);
+
+    auto ba = make_assertion (m_bank, JAN_15, dollars (50));
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_PASS, gnc_balance_assertion_get_status (ba));
+
+    /* The same figure on the total basis would be wrong, because the
+     * unreconciled 30 counts there. */
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_TOTAL);
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_FAIL, gnc_balance_assertion_get_status (ba));
+}
+
+/* The property that makes the reconcile hook worth having: an item
+ * posted before the statement date but cleared on a later statement
+ * carries the later reconcile date, so it stays out of the earlier
+ * assertion and that assertion keeps holding. */
+TEST_F (BalanceAssertionTest, ReconciledBasisIgnoresLaterClearedItems)
+{
+    auto january = add_transaction (JAN_15, dollars (50));
+    reconcile_split (january, JAN_15);
+
+    auto ba = make_assertion (m_bank, JAN_15, dollars (50));
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+    ASSERT_EQ (GNC_BALANCE_ASSERTION_PASS, gnc_balance_assertion_get_status (ba));
+
+    /* A cheque written in January that only clears on the February
+     * statement. Its posting date is before the January statement date. */
+    auto late = add_transaction (JAN_15, dollars (-20));
+    reconcile_split (late, FEB_15);
+
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_PASS, gnc_balance_assertion_get_status (ba));
+
+    /* On the total basis the same assertion would now break, which is
+     * why the reconcile hook does not use it. */
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_TOTAL);
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_FAIL, gnc_balance_assertion_get_status (ba));
+}
+
+TEST_F (BalanceAssertionTest, ReconciledBasisNoticesAnUnreconciledSplit)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    reconcile_split (split, JAN_15);
+
+    auto ba = make_assertion (m_bank, JAN_15, dollars (50));
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+    ASSERT_EQ (GNC_BALANCE_ASSERTION_PASS, gnc_balance_assertion_get_status (ba));
+
+    auto trans = xaccSplitGetParent (split);
+    xaccTransBeginEdit (trans);
+    xaccSplitSetReconcile (split, NREC);
+    xaccTransCommitEdit (trans);
+
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_FAIL, gnc_balance_assertion_get_status (ba));
+}
+
+TEST_F (BalanceAssertionTest, ReconciledBasisIgnoresVoidedTransactions)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    reconcile_split (split, JAN_15);
+
+    auto voided = add_transaction (JAN_15, dollars (99));
+    reconcile_split (voided, JAN_15);
+
+    auto ba = make_assertion (m_bank, JAN_15, dollars (50));
+    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+    ASSERT_EQ (GNC_BALANCE_ASSERTION_FAIL, gnc_balance_assertion_get_status (ba));
+
+    auto trans = xaccSplitGetParent (voided);
+    xaccTransBeginEdit (trans);
+    xaccTransVoid (trans, "test");
+    xaccTransCommitEdit (trans);
+
+    EXPECT_EQ (GNC_BALANCE_ASSERTION_PASS, gnc_balance_assertion_get_status (ba));
 }

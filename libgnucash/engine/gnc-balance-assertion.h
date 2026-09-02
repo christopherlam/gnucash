@@ -94,6 +94,24 @@ extern "C"
 
 GType gnc_balance_assertion_get_type (void);
 
+/** What the asserted amount is a balance *of*. */
+typedef enum
+{
+    /** Every transaction posted to the account on or before the date,
+     *  cleared or not.  "What did this account really hold?" */
+    GNC_BALANCE_ASSERTION_BASIS_TOTAL,
+
+    /** Only the splits reconciled on or before the date, judged by each
+     *  split's own reconcile date rather than its posting date.  This
+     *  is the invariant a reconciliation establishes: an item written
+     *  in January but cleared on the February statement carries
+     *  February's reconcile date and so stays out of the January sum.
+     *  It holds until someone edits, deletes or un-reconciles a split
+     *  that was part of that statement -- which is exactly what makes
+     *  it worth recording. */
+    GNC_BALANCE_ASSERTION_BASIS_RECONCILED,
+} GncBalanceAssertionBasis;
+
 /** The outcome of evaluating an assertion against the book. */
 typedef enum
 {
@@ -136,6 +154,12 @@ void gnc_balance_assertion_set_date (GncBalanceAssertion *ba, time64 date);
  *  engine's internal sign.  See the file comment. */
 gnc_numeric gnc_balance_assertion_get_amount (const GncBalanceAssertion *ba);
 void gnc_balance_assertion_set_amount (GncBalanceAssertion *ba, gnc_numeric amount);
+
+/** Which balance the amount is asserted to be.  Defaults to
+ *  GNC_BALANCE_ASSERTION_BASIS_TOTAL. */
+GncBalanceAssertionBasis gnc_balance_assertion_get_basis (const GncBalanceAssertion *ba);
+void gnc_balance_assertion_set_basis (GncBalanceAssertion *ba,
+                                      GncBalanceAssertionBasis basis);
 
 /** A free-text note, e.g. the statement number the figure came from. */
 const char *gnc_balance_assertion_get_notes (const GncBalanceAssertion *ba);

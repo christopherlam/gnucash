@@ -25,6 +25,7 @@
 #include <qofinstance-p.h>
 
 #include "Account.h"
+#include "Split.h"
 #include "Transaction.h"
 #include "gnc-balance-assertion.h"
 #include "gnc-engine.h"
@@ -38,6 +39,7 @@ enum
     PROP_ACCOUNT,               /* Table */
     PROP_DATE,                  /* Table */
     PROP_AMOUNT,                /* Table */
+    PROP_BASIS,                 /* Table */
     PROP_NOTES,                 /* Table */
 };
 
@@ -55,6 +57,7 @@ typedef struct GncBalanceAssertionPrivate
 
     time64 date;
     gnc_numeric amount;
+    GncBalanceAssertionBasis basis;
     const char *notes;
 
     /* Memoised evaluation. Walking an account's splits on every
@@ -127,6 +130,7 @@ gnc_balance_assertion_init (GncBalanceAssertion *ba)
     priv->acct_guid = *guid_null ();
     priv->date = gnc_time64_get_day_neutral (gnc_time (nullptr));
     priv->amount = gnc_numeric_zero ();
+    priv->basis = GNC_BALANCE_ASSERTION_BASIS_TOTAL;
     priv->notes = CACHE_INSERT ("");
     priv->cache_generation = 0;
     priv->cached_actual = gnc_numeric_zero ();
@@ -168,6 +172,9 @@ gnc_balance_assertion_get_property (GObject *object, guint prop_id,
     case PROP_AMOUNT:
         g_value_set_boxed (value, &priv->amount);
         break;
+    case PROP_BASIS:
+        g_value_set_int (value, priv->basis);
+        break;
     case PROP_NOTES:
         g_value_set_string (value, priv->notes);
         break;
@@ -202,6 +209,10 @@ gnc_balance_assertion_set_property (GObject *object, guint prop_id,
     case PROP_AMOUNT:
         gnc_balance_assertion_set_amount
             (ba, *(gnc_numeric*) g_value_get_boxed (value));
+        break;
+    case PROP_BASIS:
+        gnc_balance_assertion_set_basis
+            (ba, static_cast<GncBalanceAssertionBasis>(g_value_get_int (value)));
         break;
     case PROP_NOTES:
         gnc_balance_assertion_set_notes (ba, g_value_get_string (value));
@@ -249,6 +260,18 @@ gnc_balance_assertion_class_init (GncBalanceAssertionClass *klass)
                              "the account's commodity.",
                              GNC_TYPE_NUMERIC,
                              G_PARAM_READWRITE));
+
+    g_object_class_install_property
+        (gobject_class,
+         PROP_BASIS,
+         g_param_spec_int ("basis",
+                           "Assertion Basis",
+                           "Which balance the amount is asserted to be: the "
+                           "total balance, or the reconciled one.",
+                           GNC_BALANCE_ASSERTION_BASIS_TOTAL,
+                           GNC_BALANCE_ASSERTION_BASIS_RECONCILED,
+                           GNC_BALANCE_ASSERTION_BASIS_TOTAL,
+                           G_PARAM_READWRITE));
 
     g_object_class_install_property
         (gobject_class,
@@ -433,6 +456,33 @@ gnc_balance_assertion_set_amount (GncBalanceAssertion *ba, gnc_numeric amount)
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
 }
 
+GncBalanceAssertionBasis
+gnc_balance_assertion_get_basis (const GncBalanceAssertion *ba)
+{
+    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba),
+                          GNC_BALANCE_ASSERTION_BASIS_TOTAL);
+    return GET_PRIVATE (ba)->basis;
+}
+
+void
+gnc_balance_assertion_set_basis (GncBalanceAssertion *ba,
+                                 GncBalanceAssertionBasis basis)
+{
+    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+
+    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    if (priv->basis == basis)
+        return;
+
+    gnc_balance_assertion_begin_edit (ba);
+    priv->basis = basis;
+    priv->cache_generation = 0;
+    qof_instance_set_dirty (&ba->inst);
+    gnc_balance_assertion_commit_edit (ba);
+
+    qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
+}
+
 const char *
 gnc_balance_assertion_get_notes (const GncBalanceAssertion *ba)
 {
@@ -462,6 +512,40 @@ gnc_balance_assertion_set_notes (GncBalanceAssertion *ba, const char *notes)
 /* ================================================================ */
 /* Evaluation */
 
+/* The balance a reconciliation establishes: the splits it marked, plus
+ * everything marked by earlier ones. Each split is placed by its own
+ * reconcile date -- the statement date it cleared on -- rather than by
+ * when it was posted, so an item written before the statement but
+ * cleared after it stays out of the sum.
+ *
+ * There is deliberately no engine-wide function for this: the reconcile
+ * window is the only thing that maintains split reconcile dates with
+ * enough care to make it meaningful. */
+static gnc_numeric
+reconciled_balance_as_of_reconcile_date (Account *acc, time64 date)
+{
+    gnc_numeric total = gnc_numeric_zero ();
+
+    for (GList *n = xaccAccountGetSplitList (acc); n; n = n->next)
+    {
+        Split *split = GNC_SPLIT (n->data);
+        char state = xaccSplitGetReconcile (split);
+
+        if (state != YREC && state != FREC)
+            continue;
+
+        if (xaccSplitGetDateReconciled (split) > date)
+            continue;
+
+        if (xaccTransGetVoidStatus (xaccSplitGetParent (split)))
+            continue;
+
+        total = gnc_numeric_add_fixed (total, xaccSplitGetAmount (split));
+    }
+
+    return total;
+}
+
 gnc_numeric
 gnc_balance_assertion_get_actual (const GncBalanceAssertion *ba)
 {
@@ -475,8 +559,12 @@ gnc_balance_assertion_get_actual (const GncBalanceAssertion *ba)
 
     if (priv->cache_generation != balance_generation)
     {
+        time64 end = gnc_time64_get_day_end (priv->date);
+
         priv->cached_actual =
-            xaccAccountGetBalanceAsOfDate (acc, gnc_time64_get_day_end (priv->date));
+            priv->basis == GNC_BALANCE_ASSERTION_BASIS_RECONCILED
+            ? reconciled_balance_as_of_reconcile_date (acc, end)
+            : xaccAccountGetBalanceAsOfDate (acc, end);
         priv->cache_generation = balance_generation;
     }
 
@@ -723,6 +811,11 @@ gnc_balance_assertion_register (void)
             "amount", QOF_TYPE_NUMERIC,
             (QofAccessFunc) gnc_balance_assertion_get_amount,
             (QofSetterFunc) gnc_balance_assertion_set_amount
+        },
+        {
+            "basis", QOF_TYPE_INT32,
+            (QofAccessFunc) gnc_balance_assertion_get_basis,
+            (QofSetterFunc) gnc_balance_assertion_set_basis
         },
         {
             "notes", QOF_TYPE_STRING,

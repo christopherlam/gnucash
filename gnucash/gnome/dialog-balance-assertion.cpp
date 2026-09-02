@@ -54,6 +54,7 @@ enum BalanceAssertionColumn
     COL_ASSERTED,
     COL_ACTUAL,
     COL_DIFFERENCE,
+    COL_BASIS,
     COL_STATUS_ICON,
     COL_NOTES,
     COL_ASSERTION,
@@ -65,6 +66,7 @@ struct BalanceAssertionDialog
     GtkWidget *view = nullptr;
     GtkWidget *date_edit = nullptr;
     GtkWidget *amount_edit = nullptr;
+    GtkWidget *basis_combo = nullptr;
     GtkWidget *notes_entry = nullptr;
     GtkWidget *remove_button = nullptr;
     GtkListStore *store = nullptr;
@@ -110,6 +112,14 @@ print_date (time64 date)
     return buf;
 }
 
+static const char *
+basis_label (GncBalanceAssertionBasis basis)
+{
+    return basis == GNC_BALANCE_ASSERTION_BASIS_RECONCILED
+        ? _("Reconciled")
+        : _("Posted");
+}
+
 static void
 add_column (GtkTreeView *view, const char *title, int column_id,
             int sort_column_id, bool right_align)
@@ -146,6 +156,7 @@ setup_columns (BalanceAssertionDialog *bad)
     add_column (view, _("Asserted"), COL_ASSERTED, COL_ASSERTED, true);
     add_column (view, _("Actual"), COL_ACTUAL, COL_ACTUAL, true);
     add_column (view, _("Difference"), COL_DIFFERENCE, COL_DIFFERENCE, true);
+    add_column (view, _("Basis"), COL_BASIS, COL_BASIS, false);
     add_column (view, _("Notes"), COL_NOTES, COL_NOTES, false);
 }
 
@@ -205,6 +216,8 @@ refresh_list (BalanceAssertionDialog *bad)
                             COL_ASSERTED, asserted_str.c_str(),
                             COL_ACTUAL, actual_str.c_str(),
                             COL_DIFFERENCE, difference_str.c_str(),
+                            COL_BASIS,
+                            basis_label (gnc_balance_assertion_get_basis (ba)),
                             COL_STATUS_ICON,
                             failing ? "dialog-warning" : "emblem-default",
                             COL_NOTES, gnc_balance_assertion_get_notes (ba),
@@ -247,6 +260,16 @@ date_changed_cb (GtkWidget *widget, gpointer data)
     propose_balance (static_cast<BalanceAssertionDialog*>(data));
 }
 
+static GncBalanceAssertionBasis
+selected_basis (BalanceAssertionDialog *bad)
+{
+    auto id = gtk_combo_box_get_active_id (GTK_COMBO_BOX(bad->basis_combo));
+
+    return g_strcmp0 (id, "reconciled") == 0
+        ? GNC_BALANCE_ASSERTION_BASIS_RECONCILED
+        : GNC_BALANCE_ASSERTION_BASIS_TOTAL;
+}
+
 void
 gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data)
 {
@@ -269,6 +292,7 @@ gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data)
     gnc_balance_assertion_set_account (ba, bad->account);
     gnc_balance_assertion_set_date
         (ba, gnc_date_edit_get_date (GNC_DATE_EDIT(bad->date_edit)));
+    gnc_balance_assertion_set_basis (ba, selected_basis (bad));
     gnc_ui_balance_assertion_set_display_amount
         (ba, gnc_amount_edit_get_amount (GNC_AMOUNT_EDIT(bad->amount_edit)));
     gnc_balance_assertion_set_notes
@@ -373,6 +397,7 @@ create_dialog (GtkWindow *parent, Account *account)
     bad->dialog = get_widget ("balance_assertion_dialog");
     bad->view = get_widget ("ba_treeview");
     bad->notes_entry = get_widget ("ba_notes_entry");
+    bad->basis_combo = get_widget ("ba_basis_combo");
     bad->remove_button = get_widget ("ba_remove_button");
     bad->store = GTK_LIST_STORE(gtk_builder_get_object (builder,
                                                         "assertion_liststore"));

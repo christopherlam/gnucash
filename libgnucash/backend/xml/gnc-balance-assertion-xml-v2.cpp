@@ -45,8 +45,22 @@ const gchar* balance_assertion_version_string = "2.0.0";
 #define ba_account_string             "bassert:account"
 #define ba_date_string                "bassert:date"
 #define ba_amount_string              "bassert:amount"
+#define ba_basis_string               "bassert:basis"
 #define ba_notes_string               "bassert:notes"
 #define ba_slots_string               "bassert:slots"
+
+/* Spelled out rather than written as a number: a data file is the one
+ * place where the extra bytes buy real readability. */
+#define ba_basis_total_string       "total"
+#define ba_basis_reconciled_string  "reconciled"
+
+static const char*
+basis_to_string (GncBalanceAssertionBasis basis)
+{
+    return basis == GNC_BALANCE_ASSERTION_BASIS_RECONCILED
+        ? ba_basis_reconciled_string
+        : ba_basis_total_string;
+}
 
 xmlNodePtr
 gnc_balance_assertion_dom_tree_create (GncBalanceAssertion* ba)
@@ -74,6 +88,10 @@ gnc_balance_assertion_dom_tree_create (GncBalanceAssertion* ba)
 
     gnc_numeric amount = gnc_balance_assertion_get_amount (ba);
     xmlAddChild (ret, gnc_numeric_to_dom_tree (ba_amount_string, &amount));
+
+    xmlAddChild (ret, text_to_dom_tree
+                 (ba_basis_string,
+                  basis_to_string (gnc_balance_assertion_get_basis (ba))));
 
     notes = gnc_balance_assertion_get_notes (ba);
     if (notes && *notes)
@@ -142,6 +160,25 @@ ba_amount_handler (xmlNodePtr node, gpointer ba)
 }
 
 static gboolean
+ba_basis_handler (xmlNodePtr node, gpointer p)
+{
+    auto ba = GNC_BALANCE_ASSERTION (p);
+    auto set_basis = [ba](const char* text)
+    {
+        /* An unrecognised basis is treated as the total balance: a
+         * newer GnuCash may add one, and reading the file with the
+         * wrong basis beats refusing to read it at all. */
+        gnc_balance_assertion_set_basis
+            (ba, g_strcmp0 (text, ba_basis_reconciled_string) == 0
+             ? GNC_BALANCE_ASSERTION_BASIS_RECONCILED
+             : GNC_BALANCE_ASSERTION_BASIS_TOTAL);
+        return true;
+    };
+
+    return apply_xmlnode_text<bool> (set_basis, node, false);
+}
+
+static gboolean
 ba_notes_handler (xmlNodePtr node, gpointer ba)
 {
     return apply_xmlnode_text (gnc_balance_assertion_set_notes,
@@ -160,6 +197,7 @@ static struct dom_tree_handler balance_assertion_handlers[] =
     { ba_account_string, ba_account_handler, 0, 0 },
     { ba_date_string, ba_date_handler, 1, 0 },
     { ba_amount_string, ba_amount_handler, 1, 0 },
+    { ba_basis_string, ba_basis_handler, 0, 0 },
     { ba_notes_string, ba_notes_handler, 0, 0 },
     { ba_slots_string, ba_slots_handler, 0, 0 },
     { NULL, 0, 0, 0 }
