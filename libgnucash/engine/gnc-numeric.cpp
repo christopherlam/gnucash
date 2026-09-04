@@ -33,6 +33,7 @@
 #include <boost/regex.hpp>
 #include <boost/regex/icu.hpp>
 #include <boost/locale/encoding_utf.hpp>
+#include <ctre.hpp>
 
 #include <config.h>
 #include <stdexcept>
@@ -118,11 +119,39 @@ GncNumeric::GncNumeric(double d) : m_num(0), m_den(1)
     m_den = r.denom();
 }
 
-using boost::regex;
 using boost::u32regex;
-using boost::regex_search;
 using boost::u32regex_search;
 using boost::smatch;
+
+/* Compile-time regexes for the ASCII number-parsing grammars recognized by
+ * GncNumeric(const std::string&, bool). These are the fully-expanded forms
+ * of the fragments that used to be assembled at runtime as boost::regex
+ * objects (see the std::string fragments still used below to build
+ * sep_decimal, which needs boost's ICU-aware u32regex for locale-specific
+ * Unicode separator classes and so isn't converted).
+ * Note "-" is escaped inside the negated bracket expression because CTRE
+ * (unlike POSIX EREs) doesn't treat a "-" right after "[^" as a literal.
+ */
+static constexpr ctll::fixed_string numeral_re
+    ("^[^.0-9\\-]*(-?[0-9]*)[^0-9]*$");
+static constexpr ctll::fixed_string hex_re
+    ("^[^.0-9\\-]*(0[xX][A-Fa-f0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string numeral_rational_re
+    ("^[^.0-9\\-]*(-?[0-9]*)[ \\t]*/[ \\t]*([0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string integer_and_fraction_re
+    ("^[^.0-9\\-]*(-?)([0-9]+)[ \\t]+([0-9]+)[ \\t]*/[ \\t]*([0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string hex_rational_re
+    ("^[^.0-9\\-]*(0[xX][A-Fa-f0-9]+)[ \\t]*/[ \\t]*(0[xX][A-Fa-f0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string hex_over_num_re
+    ("^[^.0-9\\-]*(0[xX][A-Fa-f0-9]+)[ \\t]*/[ \\t]*([0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string num_over_hex_re
+    ("^[^.0-9\\-]*(-?[0-9]*)[ \\t]*/[ \\t]*(0[xX][A-Fa-f0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string decimal_re
+    ("^[^.0-9\\-]*(-?[0-9]*)[.,]([0-9]+)[^0-9]*$");
+static constexpr ctll::fixed_string scientific_re
+    ("(?:(-?[0-9]+[.,]?)|(-?[0-9]*)[.,]([0-9]+))[Ee](-?[0-9]+)");
+static constexpr ctll::fixed_string has_hex_prefix_re
+    (".*0[xX]$");
 
 
 static std::pair<int64_t, int64_t>
@@ -173,31 +202,33 @@ numeric_from_decimal_match(const std::string& integer, const std::string& decima
     return std::make_pair(n, d);
 }
 
-static std::pair<GncInt128, GncInt128>
-numeric_from_scientific_match(smatch &m)
+template <typename Match> static std::pair<GncInt128, GncInt128>
+numeric_from_scientific_match(Match &m)
 {
-    int exp{m[4].matched ? stoi(m[4].str()) : 0};
+    auto exp_group{m.template get<4>()};
+    int exp{exp_group ? stoi(exp_group.to_string()) : 0};
     auto neg_exp{exp < 0};
     exp = neg_exp ? -exp : exp;
     if (exp >= max_leg_digits)
     {
         std::ostringstream errmsg;
-        errmsg << "Exponent " << m[3].str() << " in match " << m[0].str()
-               << " exceeds range that GnuCash can parse.";
+        errmsg << "Exponent " << m.template get<3>().to_string() << " in match "
+               << m.to_string() << " exceeds range that GnuCash can parse.";
         throw std::overflow_error(errmsg.str());
     }
 
     GncInt128 num, denom;
     auto mult = powten(exp);
 
-    if (m[1].matched)
+    if (auto int_group{m.template get<1>()})
     {
         denom = neg_exp ? mult : 1;
-        num = neg_exp ? stoll(m[1].str()) : mult * stoll(m[1].str());
+        num = neg_exp ? stoll(int_group.to_string()) : mult * stoll(int_group.to_string());
     }
     else
     {
-        auto [d_num, d_denom] = numeric_from_decimal_match(m[2].str(), m[3].str());
+        auto [d_num, d_denom] = numeric_from_decimal_match(m.template get<2>().to_string(),
+                                                             m.template get<3>().to_string());
 
         if (neg_exp || d_denom > mult)
         {
@@ -250,36 +281,21 @@ GncNumeric::GncNumeric(const std::string &str, bool autoround) {
     static const std::string begin_group("(?:");
     static const std::string end_group(")");
     static const std::string or_op("|");
-    static const std::string maybe_sign ("(-?)");
-    static const std::string opt_signed_int("(-?[0-9]*)");
     static const std::string opt_signed_separated_int("(-?[0-9]{1,3})");
-    static const std::string unsigned_int("([0-9]+)");
     static const std::string eu_separated_int("(?:[[:space:]'.]([0-9]{3}))?");
     static const std::string en_separated_int("(?:\\,([0-9]{3}))?");
     static const std::string eu_decimal_part("(?:\\,([0-9]+))?");
     static const std::string en_decimal_part("(?:\\.([0-9]+))?");
-    static const std::string hex_frag("(0[xX][A-Fa-f0-9]+)");
-    static const std::string slash("[ \\t]*/[ \\t]*");
-    static const std::string whitespace("[ \\t]+");
     static const std::string eu_sep_decimal(begin_group + opt_signed_separated_int + eu_separated_int + eu_separated_int + eu_separated_int + eu_separated_int + eu_decimal_part + end_group);
     static const std::string en_sep_decimal(begin_group + opt_signed_separated_int + en_separated_int + en_separated_int + en_separated_int + en_separated_int + en_decimal_part + end_group);
-    /* The llvm standard C++ library refused to recognize the - in the
-     * opt_signed_int pattern with the default ECMAScript syntax so we use the
-     * awk syntax.
+    /* sep_decimal needs boost's ICU-aware u32regex to recognize locale-specific
+     * Unicode separator characters, so it isn't converted to CTRE. All the
+     * other, purely-ASCII, grammars are matched via the compile-time CTRE
+     * patterns declared near the top of this file.
      */
-    static const regex numeral(begin + opt_signed_int + end);
-    static const regex hex(begin + hex_frag + end);
-    static const regex numeral_rational(begin + opt_signed_int + slash + unsigned_int + end);
-    static const regex integer_and_fraction(begin + maybe_sign + unsigned_int + whitespace + unsigned_int + slash + unsigned_int + end);
-    static const regex hex_rational(begin + hex_frag + slash + hex_frag + end);
-    static const regex hex_over_num(begin + hex_frag + slash + unsigned_int + end);
-    static const regex num_over_hex(begin + opt_signed_int + slash + hex_frag + end);
-    static const regex decimal(begin + opt_signed_int + "[.,]" + unsigned_int + end);
     static const u32regex sep_decimal =
         boost::make_u32regex(begin + begin_group + eu_sep_decimal + or_op + en_sep_decimal + end_group + end);
-    static const regex scientific("(?:(-?[0-9]+[.,]?)|(-?[0-9]*)[.,]([0-9]+))[Ee](-?[0-9]+)");
-    static const regex has_hex_prefix(".*0[xX]$");
-    smatch m, x;
+    smatch m;
     /* The order of testing the regexes is from the more restrictve to the less
      * restrictive, as less-restrictive ones will match  patterns that would also
      * match the more-restrictive and so invoke the wrong construction.
@@ -293,57 +309,61 @@ GncNumeric::GncNumeric(const std::string &str, bool autoround) {
         m_den = res->denom;
         return;
     }
-    if (regex_search(str, m, hex_rational))
+    if (auto mm = ctre::match<hex_rational_re>(str))
     {
-        GncNumeric n(stoll(m[1].str(), nullptr, 16),
-                     stoll(m[2].str(), nullptr, 16));
+        GncNumeric n(stoll(mm.get<1>().to_string(), nullptr, 16),
+                     stoll(mm.get<2>().to_string(), nullptr, 16));
 
         m_num = n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, hex_over_num))
+    if (auto mm = ctre::match<hex_over_num_re>(str))
     {
-        GncNumeric n(stoll(m[1].str(), nullptr, 16), stoll(m[2].str()));
+        GncNumeric n(stoll(mm.get<1>().to_string(), nullptr, 16), stoll(mm.get<2>().to_string()));
         m_num = n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, num_over_hex))
+    if (auto mm = ctre::match<num_over_hex_re>(str))
     {
-        GncNumeric n(stoll(m[1].str()), stoll(m[2].str(), nullptr, 16));
+        GncNumeric n(stoll(mm.get<1>().to_string()), stoll(mm.get<2>().to_string(), nullptr, 16));
         m_num = n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, integer_and_fraction))
+    if (auto mm = ctre::match<integer_and_fraction_re>(str))
     {
-        GncNumeric n(stoll(m[3].str()), stoll(m[4].str()));
-        n += stoll(m[2].str());
-        m_num = m[1].str().empty() ? n.num() : -n.num();
+        GncNumeric n(stoll(mm.get<3>().to_string()), stoll(mm.get<4>().to_string()));
+        n += stoll(mm.get<2>().to_string());
+        m_num = mm.get<1>().to_view().empty() ? n.num() : -n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, numeral_rational))
+    if (auto mm = ctre::match<numeral_rational_re>(str))
     {
-        GncNumeric n(stoll(m[1].str()), stoll(m[2].str()));
+        GncNumeric n(stoll(mm.get<1>().to_string()), stoll(mm.get<2>().to_string()));
         m_num = n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, scientific) && ! regex_match(m.prefix().str(), x,  has_hex_prefix))
+    if (auto mm = ctre::search<scientific_re>(str))
     {
-        auto [num, denom] =
-            reduce_number_pair(numeric_from_scientific_match(m),
-                                   str, autoround);
-        m_num = num;
-        m_den = denom;
-        return;
+        std::string prefix(str.data(), mm.data() - str.data());
+        if (!ctre::match<has_hex_prefix_re>(prefix))
+        {
+            auto [num, denom] =
+                reduce_number_pair(numeric_from_scientific_match(mm),
+                                       str, autoround);
+            m_num = num;
+            m_den = denom;
+            return;
+        }
     }
-    if (regex_search(str, m, decimal))
+    if (auto mm = ctre::match<decimal_re>(str))
     {
-        std::string integer{m[1].matched ? m[1].str() : ""};
-        std::string decimal{m[2].matched ? m[2].str() : ""};
+        std::string integer{mm.get<1>() ? mm.get<1>().to_string() : ""};
+        std::string decimal{mm.get<2>() ? mm.get<2>().to_string() : ""};
         auto [num, denom] = reduce_number_pair(numeric_from_decimal_match(integer, decimal), str, autoround);
         m_num = num;
         m_den = denom;
@@ -382,16 +402,16 @@ GncNumeric::GncNumeric(const std::string &str, bool autoround) {
         m_den = denom;
         return;
     }
-    if (regex_search(str, m, hex))
+    if (auto mm = ctre::match<hex_re>(str))
     {
-        GncNumeric n(stoll(m[1].str(), nullptr, 16), INT64_C(1));
+        GncNumeric n(stoll(mm.get<1>().to_string(), nullptr, 16), INT64_C(1));
         m_num = n.num();
         m_den = n.denom();
         return;
     }
-    if (regex_search(str, m, numeral))
+    if (auto mm = ctre::match<numeral_re>(str))
     {
-        GncNumeric n(stoll(m[1].str()), INT64_C(1));
+        GncNumeric n(stoll(mm.get<1>().to_string()), INT64_C(1));
         m_num = n.num();
         m_den = n.denom();
         return;

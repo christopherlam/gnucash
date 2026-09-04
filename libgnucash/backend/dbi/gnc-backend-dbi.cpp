@@ -58,8 +58,9 @@
 #include "splint-defs.h"
 #endif
 
-#include <boost/regex.hpp>
+#include <ctre.hpp>
 #include <string>
+#include <string_view>
 #include <iomanip>
 
 #include <qofsession.hpp>
@@ -526,6 +527,12 @@ error_handler<DbType::DBI_MYSQL> (dbi_conn conn, void* user_data)
 
 #define SQL_OPTION_TO_REMOVE "NO_ZERO_DATE"
 
+/* Regex that finds the SQL_OPTION_TO_REMOVE as the first, last, or middle of a
+ * comma-delimited list.
+ */
+static constexpr ctll::fixed_string sql_option_to_remove_re
+    ("(?:," SQL_OPTION_TO_REMOVE "$|\\b" SQL_OPTION_TO_REMOVE "\\b,?)");
+
 /* Given an sql_options string returns a copy of the string adjusted as
  * necessary.  In particular if string the contains SQL_OPTION_TO_REMOVE it is
  * removed along with comma separator.
@@ -533,12 +540,17 @@ error_handler<DbType::DBI_MYSQL> (dbi_conn conn, void* user_data)
 std::string
 adjust_sql_options_string(const std::string& str)
 {
-/* Regex that finds the SQL_OPTION_TO_REMOVE as the first, last, or middle of a
- * comma-delimited list.
- */
-    static const boost::regex reg{"(?:," SQL_OPTION_TO_REMOVE "$|\\b"
-            SQL_OPTION_TO_REMOVE "\\b,?)"};
-    return regex_replace(str, reg, std::string{""});
+    std::string result;
+    std::string_view remaining(str);
+    while (auto m = ctre::search<sql_option_to_remove_re>(remaining))
+    {
+        auto whole = m.to_view();
+        auto match_start = static_cast<size_t>(whole.data() - remaining.data());
+        result.append(remaining.data(), match_start);
+        remaining.remove_prefix(match_start + whole.size());
+    }
+    result.append(remaining);
+    return result;
 }
 
 /* checks mysql sql_options and adjusts if necessary */
