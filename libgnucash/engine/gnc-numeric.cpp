@@ -136,12 +136,6 @@ operator+(const ctll::fixed_string<N>& a, const ctll::fixed_string<M>& b)
     return ctll::fixed_string<N + M>(buf);
 }
 
-static std::string
-to_std_string(std::u8string_view v)
-{
-    return std::string(reinterpret_cast<const char*>(v.data()), v.size());
-}
-
 /* A ctre::regex_results-like match/capture object: contextually
  * convertible to bool (whether it matched) and readable as text via
  * to_string(). Used to constrain the template helpers below, which are
@@ -407,7 +401,11 @@ GncNumeric::GncNumeric(const std::string &str, bool autoround) {
          * arguments, so the original run-time loops are unrolled here.)
          */
         auto append = [](std::string& acc, auto&& cap) {
-            if (cap) acc += to_std_string(cap.to_view());
+            if (cap)
+            {
+                auto v = cap.to_view();
+                acc.append(reinterpret_cast<const char*>(v.data()), v.size());
+            }
         };
         std::string integer, decimal;
         append(integer, m.get<1>());
