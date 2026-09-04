@@ -31,6 +31,7 @@
 #include <glib.h>
 #include <string.h>
 
+#include <concepts>
 #include <ctre.hpp>
 
 #include "gnc-engine.h"
@@ -39,6 +40,32 @@
 #include "import-parse.h"
 
 static QofLogModule log_module = GNC_MOD_IMPORT;
+
+/* A ctre::regex_results-like match/capture object: contextually
+ * convertible to bool (whether it matched), and exposing indexed capture
+ * groups (also convertible to bool, and readable via .data()/.size())
+ * through get<N>(). date_regex, date_mdy_regex and date_ymd_regex each
+ * produce a differently-typed match object, so extract_date_parts() and
+ * check_date_format() below are templated on it; this constrains that
+ * template parameter to something that actually looks like one, rather
+ * than accepting anything.
+ */
+namespace {
+template <typename C>
+concept CtreCapture = requires(const C& c) {
+    { static_cast<bool>(c) } -> std::convertible_to<bool>;
+    { c.data() } -> std::convertible_to<const char*>;
+    { c.size() } -> std::convertible_to<std::size_t>;
+};
+
+template <typename M>
+concept CtreMatchResult = requires(const M& m) {
+    { static_cast<bool>(m) } -> std::convertible_to<bool>;
+    { m.template get<1>() } -> CtreCapture;
+    { m.template get<2>() } -> CtreCapture;
+    { m.template get<3>() } -> CtreCapture;
+};
+} // anonymous namespace
 
 /* numeric regular expressions */
 static constexpr ctll::fixed_string decimal_radix_regex(
@@ -86,7 +113,7 @@ my_strntol(const char *str, int len)
  * given none of the three groups in any of those patterns is optional,
  * but is checked for defensively since the caller relies on it.
  */
-template <typename Match>
+template <CtreMatchResult Match>
 static bool
 extract_date_parts(Match &match, int &val0, int &val1, int &val2,
                     int &len0, int &len1, int &len2)
@@ -112,7 +139,7 @@ extract_date_parts(Match &match, int &val0, int &val1, int &val2,
  * of possible date formats, return the list of formats that this string
  * could actually be.
  */
-template <typename Match>
+template <CtreMatchResult Match>
 static GncImportFormat
 check_date_format(Match &match, GncImportFormat fmts)
 {
