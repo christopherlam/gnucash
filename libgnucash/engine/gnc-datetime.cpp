@@ -29,6 +29,7 @@
 #include <boost/date_time/local_time/local_time.hpp>
 #include <boost/locale.hpp>
 #include <boost/regex.hpp>
+#include <concepts>
 #include <ctre.hpp>
 #include <stdexcept>
 #include <unicode/smpdtfmt.h>
@@ -430,6 +431,33 @@ tz_from_string(std::string str)
     return TZ_Ptr(new PTZ(tzstr));
 }
 
+namespace {
+/* A ctre::regex_results-like match/capture object, as produced by
+ * ctre::match<pattern>(). delim_iso and non_delim below each produce a
+ * differently-typed match, both with an optional timezone offset as
+ * capture group 2 - tz_group_str() extracts it (or "" if not present)
+ * from either.
+ */
+template <typename C>
+concept CtreCapture = requires(const C& c) {
+    { static_cast<bool>(c) } -> std::convertible_to<bool>;
+    { c.to_string() } -> std::convertible_to<std::string>;
+};
+
+template <typename M>
+concept CtreMatchResult = requires(const M& m) {
+    { static_cast<bool>(m) } -> std::convertible_to<bool>;
+    { m.template get<2>() } -> CtreCapture;
+};
+
+template <CtreMatchResult Match>
+std::string
+tz_group_str(const Match& sm)
+{
+    return sm.template get<2>() ? sm.template get<2>().to_string() : std::string();
+}
+} // anonymous namespace
+
 GncDateTimeImpl::GncDateTimeImpl(const char* str) :
     m_time(unix_epoch, utc_zone)
 {
@@ -451,14 +479,12 @@ GncDateTimeImpl::GncDateTimeImpl(const char* str) :
             std::string time_str(sm.get<1>().to_string());
             time_str.insert(8, "T");
             pdt = boost::posix_time::from_iso_string(time_str);
-            if (sm.get<2>())
-                tzstr = sm.get<2>().to_string();
+            tzstr = tz_group_str(sm);
         }
         else if (auto sm = ctre::match<delim_iso>(str))
         {
             pdt = boost::posix_time::time_from_string(sm.get<1>().to_string());
-            if (sm.get<2>())
-                tzstr = sm.get<2>().to_string();
+            tzstr = tz_group_str(sm);
         }
         else
         {
