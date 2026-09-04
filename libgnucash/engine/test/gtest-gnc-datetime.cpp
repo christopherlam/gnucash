@@ -350,6 +350,31 @@ TEST(gnc_datetime_constructors, test_string_constructor)
     EXPECT_EQ(tm.tm_hour,11);
     EXPECT_EQ(tm.tm_min, 57);
     EXPECT_EQ(tm.tm_sec, 3);
+
+/* Delimited date-time with fractional seconds and a negative offset */
+    timestr = "2015-12-05 11:57:03.123456789 -0500";
+    GncDateTime time5(timestr);
+    tm = time5.utc_tm();
+    EXPECT_EQ(tm.tm_year, 115);
+    EXPECT_EQ(tm.tm_mon, 11);
+    EXPECT_EQ(tm.tm_mday, 5);
+    EXPECT_EQ(tm.tm_hour, 16);
+    EXPECT_EQ(tm.tm_min, 57);
+    EXPECT_EQ(tm.tm_sec, 3);
+
+/* Non-delimited date-time with fractional seconds and no offset */
+    timestr = "20151205115703.5";
+    GncDateTime time6(timestr);
+    tm = time6.utc_tm();
+    EXPECT_EQ(tm.tm_year, 115);
+    EXPECT_EQ(tm.tm_mon, 11);
+    EXPECT_EQ(tm.tm_mday, 5);
+    EXPECT_EQ(tm.tm_hour, 11);
+    EXPECT_EQ(tm.tm_min, 57);
+    EXPECT_EQ(tm.tm_sec, 3);
+
+/* An unparseable string must still throw. */
+    EXPECT_THROW(GncDateTime{std::string{"not-a-date"}}, std::invalid_argument);
 }
 
 TEST(gnc_datetime_constructors, test_struct_tm_constructor)
