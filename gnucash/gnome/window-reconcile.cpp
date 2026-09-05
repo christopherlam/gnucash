@@ -2444,12 +2444,18 @@ record_reconciled_balance (Account *account, time64 date, gnc_numeric ending)
     auto ba = gnc_reconciled_balance_new (gnc_get_current_book ());
     gnc_reconciled_balance_set_account (ba, account);
     gnc_reconciled_balance_set_date (ba, date);
-    /* new_ending has already had any display reversal undone, so it is
-     * in the engine's sign convention, which is what the setter wants. */
-    gnc_reconciled_balance_set_amount (ba, ending);
+    /* Seal what the book itself says about that date, not the statement
+     * figure: the two differ by anything not yet cleared, and only the
+     * book's own number can be recomputed later to check it. The
+     * statement figure goes in the notes, where it is worth having. */
+    gnc_reconciled_balance_set_amount
+        (ba, gnc_reconciled_balance_compute (account, date));
 
     auto datebuf = qof_print_date (date);
-    auto notes = g_strdup_printf (_("Reconciled to statement of %s"), datebuf);
+    auto pinfo = gnc_account_print_info (account, TRUE);
+    auto shown = gnc_reverse_balance (account) ? gnc_numeric_neg (ending) : ending;
+    auto notes = g_strdup_printf (_("Reconciled to statement of %s, ending %s"),
+                                  datebuf, xaccPrintAmount (shown, pinfo));
     gnc_reconciled_balance_set_notes (ba, notes);
     g_free (notes);
     g_free (datebuf);

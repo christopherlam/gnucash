@@ -2272,7 +2272,7 @@ add_summary_label (GtkWidget *summarybar, gboolean pack_start, const char *label
 }
 
 /* A quiet note in the summary bar when one of this account's recorded
- * reconciled balances no longer holds. It is deliberately passive: no
+ * recorded balances no longer holds. It is deliberately passive: no
  * dialog, nothing blocked. Someone working in the register is the
  * person most likely to have just caused it, and the most able to say
  * whether it was on purpose. */
@@ -2326,8 +2326,8 @@ gsr_update_reconciled_balance_warning (GNCSplitReg *gsr, Account *leader)
         return;
     }
 
-    text = g_strdup_printf (ngettext ("%d reconciled balance no longer holds",
-                                      "%d reconciled balances no longer hold",
+    text = g_strdup_printf (ngettext ("%d recorded balance no longer holds",
+                                      "%d recorded balances no longer hold",
                                       broken),
                             broken);
     gtk_label_set_text (GTK_LABEL(gsr->reconciled_balance_warning_label), text);

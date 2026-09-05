@@ -38,6 +38,7 @@
 #include "gnc-engine.h"
 #include "gnc-gnome-utils.h"
 #include "gnc-gui-query.h"
+#include "gnc-ui.h"
 #include "gnc-prefs.h"
 #include "gnc-session.h"
 #include "gnc-ui-balances.h"
@@ -69,6 +70,7 @@ struct ReconciledBalanceDialog
     GtkWidget *date_edit = nullptr;
     GtkWidget *amount_edit = nullptr;
     GtkWidget *notes_entry = nullptr;
+    GtkWidget *reseal_button = nullptr;
     GtkWidget *update_button = nullptr;
     GtkWidget *remove_button = nullptr;
     GtkListStore *store = nullptr;
@@ -93,6 +95,7 @@ extern "C"
 {
 void gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data);
 void gnc_reconciled_balance_dialog_update_cb (GtkWidget *widget, gpointer data);
+void gnc_reconciled_balance_dialog_reseal_cb (GtkWidget *widget, gpointer data);
 void gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data);
 void gnc_reconciled_balance_dialog_selection_changed_cb (GtkTreeSelection *sel,
                                                         gpointer data);
@@ -248,6 +251,10 @@ refresh_list (ReconciledBalanceDialog *bad)
     if (was_selected)
         select_record (bad, was_selected);
     bad->loading_entry_row = was_loading;
+
+    gtk_widget_set_sensitive
+        (bad->reseal_button,
+         gnc_reconciled_balance_count_broken_for_account (bad->account) > 0);
 
     auto selected = get_selected (bad) != nullptr;
     gtk_widget_set_sensitive (bad->remove_button, selected);
@@ -407,6 +414,52 @@ gnc_reconciled_balance_dialog_update_cb (GtkWidget *widget, gpointer data)
 }
 
 void
+gnc_reconciled_balance_dialog_reseal_cb (GtkWidget *widget, gpointer data)
+{
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
+
+    if (!bad->account)
+        return;
+
+    auto broken = gnc_reconciled_balance_count_broken_for_account (bad->account);
+    if (broken == 0)
+        return;
+
+    auto pinfo = gnc_account_print_info (bad->account, TRUE);
+    gnc_numeric shared;
+    std::string detail;
+
+    /* Records all out by the same amount are the signature of one
+     * back-dated transaction -- a cheque entered late, most often --
+     * rather than of scattered damage. Saying so is the difference
+     * between the user reading this and clicking through it. */
+    if (gnc_ui_account_broken_balances_share_delta (bad->account, &shared))
+        detail = std::string (_("They are all out by the same amount, ")) +
+                 print_amount (shared, pinfo) +
+                 _(", which usually means one transaction was entered "
+                   "after the fact with an earlier date.");
+    else
+        detail = _("They are out by differing amounts, which means more than "
+                   "one thing has changed. It is worth looking at them before "
+                   "accepting.");
+
+    auto question = g_strdup_printf
+        (ngettext ("Re-record %d balance at what the book holds now?",
+                   "Re-record %d balances at what the book holds now?", broken),
+         broken);
+
+    auto proceed = gnc_verify_dialog (GTK_WINDOW(bad->dialog), FALSE, "%s\n\n%s",
+                                      question, detail.c_str());
+    g_free (question);
+
+    if (proceed)
+    {
+        gnc_ui_account_reseal_reconciled_balances (bad->account);
+        refresh_list (bad);
+    }
+}
+
+void
 gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data)
 {
     auto bad = static_cast<ReconciledBalanceDialog*>(data);
@@ -511,6 +564,7 @@ create_dialog (GtkWindow *parent, Account *account)
     bad->dialog = get_widget ("reconciled_balance_dialog");
     bad->view = get_widget ("rb_treeview");
     bad->notes_entry = get_widget ("rb_notes_entry");
+    bad->reseal_button = get_widget ("rb_reseal_button");
     bad->update_button = get_widget ("rb_update_button");
     bad->remove_button = get_widget ("rb_remove_button");
     bad->store = GTK_LIST_STORE(gtk_builder_get_object (builder,

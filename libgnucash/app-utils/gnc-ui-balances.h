@@ -225,6 +225,28 @@ gchar * gnc_ui_account_get_reconciled_balance_status_explanation (const Account 
  */
 gchar * gnc_ui_reconciled_balance_get_description (const GncReconciledBalance *ba);
 
+/** Re-seal every broken record on @a account at the balance the book
+ *  now has, appending the figure each one used to hold to its notes.
+ *  For when the change that broke them was legitimate -- a transaction
+ *  entered late, most often.
+ *
+ *  @return The number of records re-sealed.
+ */
+guint gnc_ui_account_reseal_reconciled_balances (Account *account);
+
+/** Whether every broken record on @a account is out by the same amount,
+ *  and if so by how much.  Equal deltas are the signature of one
+ *  back-dated transaction; differing ones mean something else happened
+ *  and is worth looking at before re-sealing.
+ *
+ *  @param account The account.
+ *  @param delta Set to the shared difference when TRUE is returned.
+ *
+ *  @return TRUE if two or more records are broken and all share a delta.
+ */
+gboolean gnc_ui_account_broken_balances_share_delta (const Account *account,
+                                                     gnc_numeric *delta);
+
 /** The recorded amount with the user-facing sign convention applied, so
  *  that it can be shown in, or read out of, an entry field alongside
  *  register balances. */

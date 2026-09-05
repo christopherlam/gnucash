@@ -147,7 +147,7 @@
               <object class="GtkLabel" id="rb_amount_label">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Reconciled _balance</property>
+                <property name="label" translatable="yes">_Book balance</property>
                 <property name="use-underline">True</property>
                 <property name="xalign">1</property>
               </object>
@@ -218,6 +218,23 @@
                   </packing>
                 </child>
                 <child>
+                  <object class="GtkButton" id="rb_reseal_button">
+                    <property name="label" translatable="yes">Re_-seal</property>
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="use-underline">True</property>
+                    <property name="sensitive">False</property>
+                    <property name="tooltip-text" translatable="yes">Accept the changes to this account's history: every record that no longer holds is re-recorded at the balance the book has now.</property>
+                    <signal name="clicked" handler="gnc_reconciled_balance_dialog_reseal_cb" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+                <child>
                   <object class="GtkButton" id="rb_update_button">
                     <property name="label" translatable="yes">_Update</property>
                     <property name="visible">True</property>
@@ -231,7 +248,7 @@
                   <packing>
                     <property name="expand">False</property>
                     <property name="fill">True</property>
-                    <property name="position">1</property>
+                    <property name="position">2</property>
                   </packing>
                 </child>
                 <child>
@@ -247,7 +264,7 @@
                   <packing>
                     <property name="expand">False</property>
                     <property name="fill">True</property>
-                    <property name="position">2</property>
+                    <property name="position">3</property>
                   </packing>
                 </child>
               </object>

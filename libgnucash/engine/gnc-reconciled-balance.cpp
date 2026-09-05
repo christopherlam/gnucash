@@ -493,29 +493,14 @@ gnc_reconciled_balance_compute (Account *acc, time64 date)
 {
     g_return_val_if_fail (GNC_IS_ACCOUNT (acc), gnc_numeric_zero ());
 
-    time64 end = gnc_time64_get_day_end (date);
-    gnc_numeric total = gnc_numeric_zero ();
-
-    /* xaccAccountGetSplits hands back the account's own vector;
-     * xaccAccountGetSplitList would allocate a fresh GList on every
-     * call, and this runs on every account-tree redraw. */
-    for (Split *split : xaccAccountGetSplits (acc))
-    {
-        char state = xaccSplitGetReconcile (split);
-
-        if (state != YREC && state != FREC)
-            continue;
-
-        if (xaccSplitGetDateReconciled (split) > end)
-            continue;
-
-        if (xaccTransGetVoidStatus (xaccSplitGetParent (split)))
-            continue;
-
-        total = gnc_numeric_add_fixed (total, xaccSplitGetAmount (split));
-    }
-
-    return total;
+    /* Every split posted on or before the date, whatever its reconcile
+     * state. A record seals what the book said, so the check has to rest
+     * on facts an outside edit would have to change to do damage -- post
+     * dates and amounts -- and not on bookkeeping metadata. Split
+     * reconcile dates in particular are rewritten wholesale by the
+     * importer (import-backend.cpp), which would break every record in
+     * the book after a routine CSV or OFX import. */
+    return xaccAccountGetBalanceAsOfDate (acc, gnc_time64_get_day_end (date));
 }
 
 gnc_numeric
@@ -536,6 +521,22 @@ gnc_reconciled_balance_get_actual (const GncReconciledBalance *ba)
     }
 
     return priv->cached_actual;
+}
+
+gnc_numeric
+gnc_reconciled_balance_reseal (GncReconciledBalance *rb)
+{
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (rb), gnc_numeric_zero ());
+
+    gnc_numeric was = gnc_reconciled_balance_get_amount (rb);
+    Account *acc = gnc_reconciled_balance_get_account (rb);
+
+    if (acc)
+        gnc_reconciled_balance_set_amount
+            (rb, gnc_reconciled_balance_compute
+             (acc, gnc_reconciled_balance_get_date (rb)));
+
+    return was;
 }
 
 gnc_numeric

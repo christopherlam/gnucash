@@ -25,41 +25,44 @@
 /** @addtogroup ReconciledBalance Reconciled Balances
     @{ */
 /** @file gnc-reconciled-balance.h
- *  @brief A record of what a reconciliation agreed, kept so it can be
- *  checked again
+ *  @brief A seal on what the book said at a date, checked again as the
+ *  book changes
  *
- *  Finishing a reconciliation in GnuCash marks the splits it covered and
- *  stores the statement date, and then throws away the statement's
- *  ending balance -- the one number the user actually agreed with the
- *  bank.  Nothing afterwards can answer "is that statement still
- *  reconciled?".
+ *  Finishing a reconciliation tells you the past is right.  Nothing then
+ *  watches it.  A transaction dated inside that period can be deleted,
+ *  edited, entered late, or arrive twice from a CSV or OFX import, and
+ *  the book will not mention it again.
  *
- *  A reconciled balance is that missing record: account @a A had
- *  reconciled balance @a B as of statement date @a D.  One is written
- *  automatically when a reconciliation finishes, and they can also be
- *  entered by hand for a statement reconciled elsewhere or before this
- *  feature existed.
+ *  A record seals it: account @a A had balance @a B as of the end of day
+ *  @a D, where @a B is what the book itself computed at the moment the
+ *  record was made.  One is written automatically when a reconciliation
+ *  finishes; they can also be added by hand as checkpoints.
+ *
+ *  What it does and does not tell you:
+ *
+ *  - It detects *any* change to what the account held on or before @a D,
+ *    whatever caused it -- the register, an import, a script, the python
+ *    bindings, a hand-edited file, a restored backup.  It rests only on
+ *    post dates and amounts, so no code path can slip past it and no
+ *    metadata rewrite can falsify it.
+ *
+ *  - It cannot tell you whether the change was wanted.  A duplicate
+ *    import, a back-dated typo and a cheque you wrote in January and
+ *    entered in March are the same event to it: a split dated on or
+ *    before @a D appeared after the seal was made.  Intent is not in the
+ *    data.  So a broken record means "go and look", never "something is
+ *    wrong".
+ *
+ *  - When the change was legitimate, the record is re-sealed at the new
+ *    balance (gnc_reconciled_balance_reseal()).  One back-dated
+ *    transaction breaks every record dated on or after it, all by the
+ *    same amount -- which is itself the signature of a single late entry,
+ *    as against the scattered deltas of real damage.
  *
  *  It enforces nothing.  It marks no split, locks nothing, and never
- *  stops a transaction being entered, edited or deleted.  It is simply
- *  re-evaluated whenever the book changes, and the result is surfaced
- *  passively -- an icon in the account tree, a tooltip naming the
- *  discrepancy.  A broken record is information, not an error.
+ *  stops a transaction being entered, edited or deleted.
  *
- *  Semantics:
- *
- *  - The sum runs over the account's splits that are marked reconciled
- *    or frozen, and each split is placed by its own reconcile date
- *    rather than by its posting date.  That is what makes the figure
- *    durable: gnc_reconcile_view_commit() stamps every newly reconciled
- *    split with the statement date, so a cheque written in January but
- *    cleared on the February statement carries February's stamp and
- *    stays out of the January sum.  A January record therefore keeps
- *    holding as reconciling continues, and breaks only when a split
- *    belonging to that statement is later edited, deleted or
- *    un-reconciled -- which is the damage worth catching.
- *
- *  - Voided transactions are excluded.
+ *  Other semantics:
  *
  *  - The amount is in the account's own commodity and covers that
  *    account alone; sub-account balances are not included.
@@ -67,8 +70,7 @@
  *  - The amount is stored with the engine's internal sign.
  *    Presentation layers that show balances with the "reversed balance"
  *    convention (income, credit card, liability, equity ...) must apply
- *    gnc_reverse_balance() themselves on the way in and out, just as the
- *    reconcile dialog does with the statement ending balance.
+ *    gnc_reverse_balance() themselves on the way in and out.
  *
  *  - The date is stored day-neutral (like a transaction post date) and
  *    the balance is taken at the end of that day.
@@ -167,10 +169,16 @@ GncReconciledBalanceStatus gnc_reconciled_balance_get_status (const GncReconcile
  *  a record whose account has been deleted does not raise an alarm. */
 gboolean gnc_reconciled_balance_is_broken (const GncReconciledBalance *ba);
 
-/** The reconciled balance @a acc actually has as of the end of the day
- *  of @a date, by the rule described in the file comment.  Exposed so
- *  that the GUI can propose a figure without duplicating the rule. */
+/** The balance @a acc actually has as of the end of the day of @a date:
+ *  the quantity a record seals.  Exposed so that the GUI can propose a
+ *  figure without duplicating the rule. */
 gnc_numeric gnc_reconciled_balance_compute (Account *acc, time64 date);
+
+/** Re-seal @a rb at the balance the book has now, for when the change
+ *  that broke it was a legitimate one.  Returns the figure it used to
+ *  hold, so a caller can mention it; the record itself keeps no history
+ *  of having been re-sealed. */
+gnc_numeric gnc_reconciled_balance_reseal (GncReconciledBalance *rb);
 
 GncReconciledBalance *gnc_reconciled_balance_lookup (const GncGUID *guid,
                                                    const QofBook *book);

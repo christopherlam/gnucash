@@ -135,7 +135,7 @@ protected:
     gnc_commodity *m_curr = nullptr;
 };
 
-TEST_F (ReconciledBalanceTest, NewAssertionRoundTripsItsFields)
+TEST_F (ReconciledBalanceTest, NewRecordRoundTripsItsFields)
 {
     GncReconciledBalance *ba = make_record (m_bank, JAN_15, dollars (50));
 
@@ -152,7 +152,7 @@ TEST_F (ReconciledBalanceTest, NewAssertionRoundTripsItsFields)
                gnc_time64_get_day_start (gnc_reconciled_balance_get_date (ba)));
 }
 
-TEST_F (ReconciledBalanceTest, LookupFindsAssertionInBook)
+TEST_F (ReconciledBalanceTest, LookupFindsRecordInBook)
 {
     GncReconciledBalance *ba = make_record (m_bank, JAN_15, dollars (50));
     const GncGUID *guid = gnc_reconciled_balance_get_guid (ba);
@@ -160,7 +160,7 @@ TEST_F (ReconciledBalanceTest, LookupFindsAssertionInBook)
     EXPECT_EQ (ba, gnc_reconciled_balance_lookup (guid, m_book));
 }
 
-TEST_F (ReconciledBalanceTest, CreatingAnAssertionFlagsTheBookFeature)
+TEST_F (ReconciledBalanceTest, CreatingARecordFlagsTheBookFeature)
 {
     EXPECT_FALSE (gnc_features_check_used (m_book,
                                            GNC_FEATURE_RECONCILED_BALANCES));
@@ -169,9 +169,9 @@ TEST_F (ReconciledBalanceTest, CreatingAnAssertionFlagsTheBookFeature)
                                           GNC_FEATURE_RECONCILED_BALANCES));
 }
 
-TEST_F (ReconciledBalanceTest, MatchingReconciledBalanceHolds)
+TEST_F (ReconciledBalanceTest, MatchingBalanceHolds)
 {
-    reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
+    add_transaction (JAN_15, dollars (50));
     auto rb = make_record (m_bank, JAN_15, dollars (50));
 
     EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
@@ -182,7 +182,7 @@ TEST_F (ReconciledBalanceTest, MatchingReconciledBalanceHolds)
 
 TEST_F (ReconciledBalanceTest, MismatchedBalanceIsBroken)
 {
-    reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
+    add_transaction (JAN_15, dollars (50));
     auto rb = make_record (m_bank, JAN_15, dollars (40));
 
     EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
@@ -191,64 +191,49 @@ TEST_F (ReconciledBalanceTest, MismatchedBalanceIsBroken)
                                     gnc_reconciled_balance_get_delta (rb)));
 }
 
-TEST_F (ReconciledBalanceTest, UnreconciledSplitsDoNotCount)
+/* The seal is on what the book held, so reconcile state is beside the
+ * point -- an uncleared transaction counts exactly as much as a
+ * reconciled one. */
+TEST_F (ReconciledBalanceTest, EverythingPostedCountsWhateverItsState)
 {
     reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
     add_transaction (JAN_15, dollars (30));      /* left unreconciled */
 
-    auto rb = make_record (m_bank, JAN_15, dollars (50));
+    auto rb = make_record (m_bank, JAN_15, dollars (80));
     EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
 }
 
-/* The property the whole feature rests on: an item posted before the
- * statement date but cleared on a later statement carries the later
- * reconcile date, so it stays out of the earlier record and that record
- * keeps holding. Placing splits by posting date instead would break it. */
-TEST_F (ReconciledBalanceTest, LaterClearedItemsAreIgnored)
+TEST_F (ReconciledBalanceTest, LaterDatedTransactionsDoNotAffectIt)
 {
-    reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
-
+    add_transaction (JAN_15, dollars (50));
     auto rb = make_record (m_bank, JAN_15, dollars (50));
-    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
-               gnc_reconciled_balance_get_status (rb));
 
-    /* A cheque written in January that only clears on the February
-     * statement. Its posting date is before the January statement date. */
-    reconcile_split (add_transaction (JAN_15, dollars (-20)), FEB_15);
+    add_transaction (FEB_15, dollars (25));
 
     EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
-
-    /* ... and February's own record sees both. */
-    auto feb = make_record (m_bank, FEB_15, dollars (30));
-    EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
-               gnc_reconciled_balance_get_status (feb));
 }
 
-TEST_F (ReconciledBalanceTest, UnreconcilingASplitBreaksTheRecord)
+TEST_F (ReconciledBalanceTest, DeletingAnEarlierTransactionBreaksIt)
 {
     auto split = add_transaction (JAN_15, dollars (50));
-    reconcile_split (split, JAN_15);
-
     auto rb = make_record (m_bank, JAN_15, dollars (50));
     ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
 
     auto trans = xaccSplitGetParent (split);
     xaccTransBeginEdit (trans);
-    xaccSplitSetReconcile (split, NREC);
+    xaccTransDestroy (trans);
     xaccTransCommitEdit (trans);
 
     EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
                gnc_reconciled_balance_get_status (rb));
 }
 
-TEST_F (ReconciledBalanceTest, EditingAReconciledSplitBreaksTheRecord)
+TEST_F (ReconciledBalanceTest, EditingAnEarlierTransactionBreaksIt)
 {
     auto split = add_transaction (JAN_15, dollars (50));
-    reconcile_split (split, JAN_15);
-
     auto rb = make_record (m_bank, JAN_15, dollars (50));
     ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
@@ -263,21 +248,123 @@ TEST_F (ReconciledBalanceTest, EditingAReconciledSplitBreaksTheRecord)
                gnc_reconciled_balance_get_status (rb));
 }
 
-TEST_F (ReconciledBalanceTest, VoidedTransactionsAreIgnored)
+/* A duplicate arriving from a CSV or OFX import lands dated inside an
+ * already-sealed period and is CREC, never YREC. Placing splits by
+ * reconcile state would miss it entirely; this is the case the seal
+ * exists for. */
+TEST_F (ReconciledBalanceTest, ABackDatedInsertBreaksIt)
 {
-    reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
-    auto voided = add_transaction (JAN_15, dollars (99));
-    reconcile_split (voided, JAN_15);
-
+    add_transaction (JAN_15, dollars (50));
     auto rb = make_record (m_bank, JAN_15, dollars (50));
-    ASSERT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
 
-    auto trans = xaccSplitGetParent (voided);
+    auto dupe = add_transaction (JAN_15, dollars (50));
+    auto trans = xaccSplitGetParent (dupe);
+    xaccTransBeginEdit (trans);
+    xaccSplitSetReconcile (dupe, CREC);
+    xaccTransCommitEdit (trans);
+
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+               gnc_reconciled_balance_get_status (rb));
+}
+
+/* The regression test for the whole design. The importer stamps every
+ * matched split's reconcile date with today (import-backend.cpp), so a
+ * rule that placed splits by that date would break every record in the
+ * book after a routine import. Nothing about the balance changed here,
+ * so nothing may break. */
+TEST_F (ReconciledBalanceTest, ImportRestampingReconcileDatesDoesNotBreakIt)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    reconcile_split (split, JAN_15);
+
+    auto rb = make_record (m_bank, JAN_15, dollars (50));
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (rb));
+
+    reconcile_split (split, gnc_time (nullptr));   /* as the importer does */
+
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (rb));
+}
+
+TEST_F (ReconciledBalanceTest, UnreconcilingASplitDoesNotBreakIt)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    reconcile_split (split, JAN_15);
+
+    auto rb = make_record (m_bank, JAN_15, dollars (50));
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (rb));
+
+    auto trans = xaccSplitGetParent (split);
+    xaccTransBeginEdit (trans);
+    xaccSplitSetReconcile (split, NREC);
+    xaccTransCommitEdit (trans);
+
+    /* The money is still there; only its state changed. */
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (rb));
+}
+
+TEST_F (ReconciledBalanceTest, VoidingRemovesTheAmountAndBreaksIt)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    auto rb = make_record (m_bank, JAN_15, dollars (50));
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (rb));
+
+    auto trans = xaccSplitGetParent (split);
     xaccTransBeginEdit (trans);
     xaccTransVoid (trans, "test");
     xaccTransCommitEdit (trans);
 
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+               gnc_reconciled_balance_get_status (rb));
+}
+
+/* One transaction entered after the fact with an earlier date breaks
+ * every record dated on or after it, all by the same amount. That equal
+ * delta is what the GUI reads to tell a late entry from real damage. */
+TEST_F (ReconciledBalanceTest, ALateEntryBreaksEverySealOnOrAfterIt)
+{
+    add_transaction (JAN_15, dollars (100));
+    auto jan = make_record (m_bank, JAN_15, dollars (100));
+    auto feb = make_record (m_bank, FEB_15, dollars (100));
+
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (jan));
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
+               gnc_reconciled_balance_get_status (feb));
+
+    /* The cheque was written on the 15th of January and entered now. */
+    add_transaction (JAN_15, dollars (-20));
+
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+               gnc_reconciled_balance_get_status (jan));
+    EXPECT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+               gnc_reconciled_balance_get_status (feb));
+    EXPECT_TRUE (gnc_numeric_equal (gnc_reconciled_balance_get_delta (jan),
+                                    gnc_reconciled_balance_get_delta (feb)));
+    EXPECT_TRUE (gnc_numeric_equal (dollars (-20),
+                                    gnc_reconciled_balance_get_delta (jan)));
+}
+
+TEST_F (ReconciledBalanceTest, ResealAdoptsTheNewBalanceAndReturnsTheOld)
+{
+    add_transaction (JAN_15, dollars (100));
+    auto rb = make_record (m_bank, JAN_15, dollars (100));
+
+    add_transaction (JAN_15, dollars (-20));
+    ASSERT_EQ (GNC_RECONCILED_BALANCE_BROKEN,
+               gnc_reconciled_balance_get_status (rb));
+
+    auto was = gnc_reconciled_balance_reseal (rb);
+
+    EXPECT_TRUE (gnc_numeric_equal (dollars (100), was));
+    EXPECT_TRUE (gnc_numeric_equal (dollars (80),
+                                    gnc_reconciled_balance_get_amount (rb)));
     EXPECT_EQ (GNC_RECONCILED_BALANCE_HOLDS,
                gnc_reconciled_balance_get_status (rb));
 }
@@ -314,7 +401,7 @@ TEST_F (ReconciledBalanceTest, ListsAreSortedByDateAndFilteredByAccount)
 
 TEST_F (ReconciledBalanceTest, CountsOnlyBrokenRecords)
 {
-    reconcile_split (add_transaction (JAN_15, dollars (50)), JAN_15);
+    add_transaction (JAN_15, dollars (50));
     make_record (m_bank, JAN_15, dollars (50)); /* holds */
     make_record (m_bank, FEB_15, dollars (99)); /* broken */
 
@@ -344,6 +431,7 @@ TEST_F (ReconciledBalanceTest, DeletingTheAccountRemovesItsRecords)
 {
     make_record (m_bank, JAN_15, dollars (50));
     make_record (m_income, JAN_15, dollars (0));
+
     GList *before = gnc_reconciled_balance_get_all (m_book);
     ASSERT_EQ (2u, g_list_length (before));
     g_list_free (before);
@@ -360,32 +448,4 @@ TEST_F (ReconciledBalanceTest, DeletingTheAccountRemovesItsRecords)
                    (GNC_RECONCILED_BALANCE (remaining->data)));
     }
     g_list_free (remaining);
-}
-
-/* Splits do not all carry the account's denominator -- imports and old
- * files produce mixed ones -- and the running total starts at 0/1. The
- * accumulation must cope rather than turning into an error value, which
- * would surface as a balance stuck at zero. */
-TEST_F (ReconciledBalanceTest, MixedDenominatorsAccumulate)
-{
-    auto a = add_transaction (JAN_15, gnc_numeric_create (50, 1));      /* 50/1 */
-    auto b = add_transaction (JAN_15, gnc_numeric_create (2550, 100));  /* 25.50 */
-    reconcile_split (a, JAN_15);
-    reconcile_split (b, JAN_15);
-
-    auto actual = gnc_reconciled_balance_compute (m_bank, JAN_15);
-    EXPECT_FALSE (gnc_numeric_check (actual));
-    EXPECT_TRUE (gnc_numeric_equal (gnc_numeric_create (7550, 100), actual));
-}
-
-/* A split reconciled by an older GnuCash, or by toggling the register's
- * R cell, may carry no reconcile date at all. It counts: it is
- * reconciled, and nothing says it happened after the statement. */
-TEST_F (ReconciledBalanceTest, SplitsWithNoReconcileDateStillCount)
-{
-    auto split = add_transaction (JAN_15, dollars (50));
-    reconcile_split (split, 0);
-
-    EXPECT_TRUE (gnc_numeric_equal (dollars (50),
-                                    gnc_reconciled_balance_compute (m_bank, JAN_15)));
 }
