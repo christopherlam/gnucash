@@ -69,6 +69,7 @@ struct ReconciledBalanceDialog
     GtkWidget *date_edit = nullptr;
     GtkWidget *amount_edit = nullptr;
     GtkWidget *notes_entry = nullptr;
+    GtkWidget *update_button = nullptr;
     GtkWidget *remove_button = nullptr;
     GtkListStore *store = nullptr;
 
@@ -76,6 +77,9 @@ struct ReconciledBalanceDialog
     /* Kept alongside the pointer so that the account can still be
      * identified after it has been deleted from the book. */
     GncGUID acct_guid {};
+    /* Set while the entry row is being filled from a record, so that
+     * the widgets' own change signals do not fight the fill. */
+    bool loading_entry_row = false;
     gint component_id = 0;
     QofSession *session = nullptr;
 };
@@ -88,12 +92,20 @@ static QofLogModule log_module = GNC_MOD_GUI;
 extern "C"
 {
 void gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data);
+void gnc_reconciled_balance_dialog_update_cb (GtkWidget *widget, gpointer data);
 void gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data);
 void gnc_reconciled_balance_dialog_selection_changed_cb (GtkTreeSelection *sel,
                                                         gpointer data);
 void gnc_reconciled_balance_dialog_response_cb (GtkDialog *dialog, gint response,
                                                gpointer data);
 }
+
+static void load_record_into_entry_row (ReconciledBalanceDialog *bad,
+                                        GncReconciledBalance *rb);
+static void propose_entry_row (ReconciledBalanceDialog *bad);
+static void propose_balance (ReconciledBalanceDialog *bad);
+static void select_record (ReconciledBalanceDialog *bad,
+                           GncReconciledBalance *wanted);
 
 /* =================================================================== */
 
@@ -171,10 +183,20 @@ get_selected (ReconciledBalanceDialog *bad)
 static void
 refresh_list (ReconciledBalanceDialog *bad)
 {
+    /* A rebuild drops and restores the selection, which would otherwise
+     * reset the entry row -- losing whatever the user was part way
+     * through typing when a background change came in. */
+    auto was_selected = get_selected (bad);
+    auto was_loading = bad->loading_entry_row;
+    bad->loading_entry_row = true;
+
     gtk_list_store_clear (bad->store);
 
     if (!bad->account)
+    {
+        bad->loading_entry_row = was_loading;
         return;
+    }
 
     auto pinfo = gnc_account_print_info (bad->account, TRUE);
     auto reverse = gnc_reverse_balance (bad->account);
@@ -223,7 +245,13 @@ refresh_list (ReconciledBalanceDialog *bad)
 
     g_list_free (records);
 
-    gtk_widget_set_sensitive (bad->remove_button, get_selected (bad) != nullptr);
+    if (was_selected)
+        select_record (bad, was_selected);
+    bad->loading_entry_row = was_loading;
+
+    auto selected = get_selected (bad) != nullptr;
+    gtk_widget_set_sensitive (bad->remove_button, selected);
+    gtk_widget_set_sensitive (bad->update_button, selected);
 }
 
 /* Fill the entry row with the reconciled balance GnuCash currently has
@@ -249,10 +277,89 @@ propose_balance (ReconciledBalanceDialog *bad)
 /* =================================================================== */
 /* Callbacks */
 
+/* Both Add and Update need the typed amount evaluated and complained
+ * about in the same way. */
+static bool
+entry_row_amount_is_valid (ReconciledBalanceDialog *bad)
+{
+    GError *error = nullptr;
+
+    if (gnc_amount_edit_evaluate (GNC_AMOUNT_EDIT(bad->amount_edit), &error))
+        return true;
+
+    gnc_error_dialog (GTK_WINDOW(bad->dialog), "%s",
+                      error ? error->message
+                            : _("The balance must be a number."));
+    g_clear_error (&error);
+    return false;
+}
+
+/* refresh_list rebuilds the store, so a record the user is working on
+ * has to be found again by pointer to keep it selected. */
+static void
+select_record (ReconciledBalanceDialog *bad, GncReconciledBalance *wanted)
+{
+    auto model = GTK_TREE_MODEL(bad->store);
+    GtkTreeIter iter;
+
+    if (!gtk_tree_model_get_iter_first (model, &iter))
+        return;
+
+    do
+    {
+        GncReconciledBalance *rb = nullptr;
+        gtk_tree_model_get (model, &iter, COL_RECORD, &rb, -1);
+
+        if (rb == wanted)
+        {
+            auto selection = gtk_tree_view_get_selection (GTK_TREE_VIEW(bad->view));
+            gtk_tree_selection_select_iter (selection, &iter);
+            return;
+        }
+    }
+    while (gtk_tree_model_iter_next (model, &iter));
+}
+
+/* Selecting a row is how you edit it: its own figures go into the entry
+ * row, and Update writes them back. Nothing is written until Update is
+ * pressed, so a stray click is harmless. */
+static void
+load_record_into_entry_row (ReconciledBalanceDialog *bad,
+                            GncReconciledBalance *rb)
+{
+    bad->loading_entry_row = true;
+
+    gnc_date_edit_set_time (GNC_DATE_EDIT(bad->date_edit),
+                            gnc_reconciled_balance_get_date (rb));
+    gnc_amount_edit_set_amount (GNC_AMOUNT_EDIT(bad->amount_edit),
+                                gnc_ui_reconciled_balance_get_display_amount (rb));
+    gtk_entry_set_text (GTK_ENTRY(bad->notes_entry),
+                        gnc_reconciled_balance_get_notes (rb));
+
+    bad->loading_entry_row = false;
+}
+
+/* With no row selected the entry row describes a record that does not
+ * exist yet, so it offers today's reconciled balance to add. */
+static void
+propose_entry_row (ReconciledBalanceDialog *bad)
+{
+    bad->loading_entry_row = true;
+    gtk_entry_set_text (GTK_ENTRY(bad->notes_entry), "");
+    bad->loading_entry_row = false;
+
+    propose_balance (bad);
+}
+
 static void
 date_changed_cb (GtkWidget *widget, gpointer data)
 {
-    propose_balance (static_cast<ReconciledBalanceDialog*>(data));
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
+
+    /* Re-proposing while a record's own date is being loaded would
+     * overwrite the balance the user is about to edit. */
+    if (!bad->loading_entry_row && !get_selected (bad))
+        propose_balance (bad);
 }
 
 void
@@ -263,15 +370,8 @@ gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data)
     if (!bad->account)
         return;
 
-    GError *error = nullptr;
-    if (!gnc_amount_edit_evaluate (GNC_AMOUNT_EDIT(bad->amount_edit), &error))
-    {
-        gnc_error_dialog (GTK_WINDOW(bad->dialog), "%s",
-                          error ? error->message
-                                : _("The balance must be a number."));
-        g_clear_error (&error);
+    if (!entry_row_amount_is_valid (bad))
         return;
-    }
 
     auto ba = gnc_reconciled_balance_new (gnc_get_current_book ());
     gnc_reconciled_balance_set_account (ba, bad->account);
@@ -282,9 +382,28 @@ gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data)
     gnc_reconciled_balance_set_notes
         (ba, gtk_entry_get_text (GTK_ENTRY(bad->notes_entry)));
 
-    gtk_entry_set_text (GTK_ENTRY(bad->notes_entry), "");
+    refresh_list (bad);
+    select_record (bad, ba);
+}
+
+void
+gnc_reconciled_balance_dialog_update_cb (GtkWidget *widget, gpointer data)
+{
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
+    auto rb = get_selected (bad);
+
+    if (!rb || !entry_row_amount_is_valid (bad))
+        return;
+
+    gnc_reconciled_balance_set_date
+        (rb, gnc_date_edit_get_date (GNC_DATE_EDIT(bad->date_edit)));
+    gnc_ui_reconciled_balance_set_display_amount
+        (rb, gnc_amount_edit_get_amount (GNC_AMOUNT_EDIT(bad->amount_edit)));
+    gnc_reconciled_balance_set_notes
+        (rb, gtk_entry_get_text (GTK_ENTRY(bad->notes_entry)));
 
     refresh_list (bad);
+    select_record (bad, rb);
 }
 
 void
@@ -296,6 +415,7 @@ gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data)
     {
         gnc_reconciled_balance_destroy (ba);
         refresh_list (bad);
+        propose_entry_row (bad);
     }
 }
 
@@ -304,8 +424,18 @@ gnc_reconciled_balance_dialog_selection_changed_cb (GtkTreeSelection *selection,
                                                    gpointer data)
 {
     auto bad = static_cast<ReconciledBalanceDialog*>(data);
+    auto rb = get_selected (bad);
 
-    gtk_widget_set_sensitive (bad->remove_button, get_selected (bad) != nullptr);
+    gtk_widget_set_sensitive (bad->remove_button, rb != nullptr);
+    gtk_widget_set_sensitive (bad->update_button, rb != nullptr);
+
+    if (bad->loading_entry_row)
+        return;
+
+    if (rb)
+        load_record_into_entry_row (bad, rb);
+    else
+        propose_entry_row (bad);
 }
 
 void
@@ -381,6 +511,7 @@ create_dialog (GtkWindow *parent, Account *account)
     bad->dialog = get_widget ("reconciled_balance_dialog");
     bad->view = get_widget ("rb_treeview");
     bad->notes_entry = get_widget ("rb_notes_entry");
+    bad->update_button = get_widget ("rb_update_button");
     bad->remove_button = get_widget ("rb_remove_button");
     bad->store = GTK_LIST_STORE(gtk_builder_get_object (builder,
                                                         "reconciled_balance_liststore"));
@@ -469,11 +600,16 @@ present_dialog (GtkWindow *parent, Account *account, bool have_date, time64 date
     if (!bad)
         bad = create_dialog (parent, account);
 
-    if (have_date)
-        gnc_date_edit_set_time (GNC_DATE_EDIT(bad->date_edit), date);
-
-    propose_balance (bad);
     refresh_list (bad);
+
+    /* Leave the entry row alone if it is showing a record the user
+     * selected; otherwise offer the requested date and its balance. */
+    if (!get_selected (bad))
+    {
+        if (have_date)
+            gnc_date_edit_set_time (GNC_DATE_EDIT(bad->date_edit), date);
+        propose_balance (bad);
+    }
 
     gtk_widget_show_all (bad->dialog);
     gtk_window_present (GTK_WINDOW(bad->dialog));

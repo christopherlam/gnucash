@@ -361,3 +361,31 @@ TEST_F (ReconciledBalanceTest, DeletingTheAccountRemovesItsRecords)
     }
     g_list_free (remaining);
 }
+
+/* Splits do not all carry the account's denominator -- imports and old
+ * files produce mixed ones -- and the running total starts at 0/1. The
+ * accumulation must cope rather than turning into an error value, which
+ * would surface as a balance stuck at zero. */
+TEST_F (ReconciledBalanceTest, MixedDenominatorsAccumulate)
+{
+    auto a = add_transaction (JAN_15, gnc_numeric_create (50, 1));      /* 50/1 */
+    auto b = add_transaction (JAN_15, gnc_numeric_create (2550, 100));  /* 25.50 */
+    reconcile_split (a, JAN_15);
+    reconcile_split (b, JAN_15);
+
+    auto actual = gnc_reconciled_balance_compute (m_bank, JAN_15);
+    EXPECT_FALSE (gnc_numeric_check (actual));
+    EXPECT_TRUE (gnc_numeric_equal (gnc_numeric_create (7550, 100), actual));
+}
+
+/* A split reconciled by an older GnuCash, or by toggling the register's
+ * R cell, may carry no reconcile date at all. It counts: it is
+ * reconciled, and nothing says it happened after the statement. */
+TEST_F (ReconciledBalanceTest, SplitsWithNoReconcileDateStillCount)
+{
+    auto split = add_transaction (JAN_15, dollars (50));
+    reconcile_split (split, 0);
+
+    EXPECT_TRUE (gnc_numeric_equal (dollars (50),
+                                    gnc_reconciled_balance_compute (m_bank, JAN_15)));
+}

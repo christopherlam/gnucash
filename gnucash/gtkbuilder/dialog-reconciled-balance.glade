@@ -218,19 +218,36 @@
                   </packing>
                 </child>
                 <child>
+                  <object class="GtkButton" id="rb_update_button">
+                    <property name="label" translatable="yes">_Update</property>
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="use-underline">True</property>
+                    <property name="sensitive">False</property>
+                    <property name="tooltip-text" translatable="yes">Apply the date, balance and notes above to the selected record</property>
+                    <signal name="clicked" handler="gnc_reconciled_balance_dialog_update_cb" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+                <child>
                   <object class="GtkButton" id="rb_add_button">
                     <property name="label" translatable="yes">_Add</property>
                     <property name="visible">True</property>
                     <property name="can-focus">True</property>
                     <property name="receives-default">True</property>
                     <property name="use-underline">True</property>
-                    <property name="tooltip-text" translatable="yes">Record that the account reconciled to this balance on this date</property>
+                    <property name="tooltip-text" translatable="yes">Record a further date on which the account reconciled to a balance</property>
                     <signal name="clicked" handler="gnc_reconciled_balance_dialog_add_cb" swapped="no"/>
                   </object>
                   <packing>
                     <property name="expand">False</property>
                     <property name="fill">True</property>
-                    <property name="position">1</property>
+                    <property name="position">2</property>
                   </packing>
                 </child>
               </object>
