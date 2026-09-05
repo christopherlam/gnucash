@@ -83,6 +83,7 @@ gnucash/gnome/dialog-price-edit-db.cpp
 gnucash/gnome/dialog-price-editor.c
 gnucash/gnome/dialog-print-check.c
 gnucash/gnome/dialog-progress.c
+gnucash/gnome/dialog-reconciled-balance.cpp
 gnucash/gnome/dialog-report-column-view.cpp
 gnucash/gnome/dialog-report-style-sheet.cpp
 gnucash/gnome/dialog-sx-editor.c
@@ -275,6 +276,7 @@ gnucash/gtkbuilder/dialog-price.glade
 gnucash/gtkbuilder/dialog-print-check.glade
 gnucash/gtkbuilder/dialog-progress.glade
 gnucash/gtkbuilder/dialog-query-view.glade
+gnucash/gtkbuilder/dialog-reconciled-balance.glade
 gnucash/gtkbuilder/dialog-report.glade
 gnucash/gtkbuilder/dialog-reset-warnings.glade
 gnucash/gtkbuilder/dialog-search.glade
@@ -568,6 +570,7 @@ libgnucash/backend/sql/gnc-lots-sql.cpp
 libgnucash/backend/sql/gnc-order-sql.cpp
 libgnucash/backend/sql/gnc-owner-sql.cpp
 libgnucash/backend/sql/gnc-price-sql.cpp
+libgnucash/backend/sql/gnc-reconciled-balance-sql.cpp
 libgnucash/backend/sql/gnc-recurrence-sql.cpp
 libgnucash/backend/sql/gnc-schedxaction-sql.cpp
 libgnucash/backend/sql/gnc-slots-sql.cpp
@@ -595,6 +598,7 @@ libgnucash/backend/xml/gnc-lot-xml-v2.cpp
 libgnucash/backend/xml/gnc-order-xml-v2.cpp
 libgnucash/backend/xml/gnc-owner-xml-v2.cpp
 libgnucash/backend/xml/gnc-pricedb-xml-v2.cpp
+libgnucash/backend/xml/gnc-reconciled-balance-xml-v2.cpp
 libgnucash/backend/xml/gnc-recurrence-xml-v2.cpp
 libgnucash/backend/xml/gnc-schedxaction-xml-v2.cpp
 libgnucash/backend/xml/gnc-tax-table-xml-v2.cpp
@@ -660,6 +664,7 @@ libgnucash/engine/gncOrder.c
 libgnucash/engine/gncOwner.c
 libgnucash/engine/gnc-pricedb.cpp
 libgnucash/engine/gnc-rational.cpp
+libgnucash/engine/gnc-reconciled-balance.cpp
 libgnucash/engine/gnc-session.c
 libgnucash/engine/gncTaxTable.c
 libgnucash/engine/gnc-timezone.cpp
