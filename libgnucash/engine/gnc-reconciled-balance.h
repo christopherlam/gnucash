@@ -187,11 +187,14 @@ GList *gnc_reconciled_balance_get_for_account (const Account *acc);
  *  with g_list_free(). */
 GList *gnc_reconciled_balance_get_broken (const QofBook *book);
 
-/** The number of broken records in the book.  Cheap enough to call from
- *  a status-bar update. */
+/** The number of broken records in the book.  Each record that has not
+ *  been checked since the last change to the book walks its account's
+ *  splits, so this is not free after an edit; results are memoised until
+ *  the next change. */
 guint gnc_reconciled_balance_count_broken (const QofBook *book);
 
-/** The number of records for @a acc that are broken. */
+/** The number of records for @a acc that are broken.  Same cost note
+ *  as gnc_reconciled_balance_count_broken(). */
 guint gnc_reconciled_balance_count_broken_for_account (const Account *acc);
 
 #ifdef __cplusplus

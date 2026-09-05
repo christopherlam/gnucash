@@ -344,7 +344,9 @@ TEST_F (ReconciledBalanceTest, DeletingTheAccountRemovesItsRecords)
 {
     make_record (m_bank, JAN_15, dollars (50));
     make_record (m_income, JAN_15, dollars (0));
-    ASSERT_EQ (2u, g_list_length (gnc_reconciled_balance_get_all (m_book)));
+    GList *before = gnc_reconciled_balance_get_all (m_book);
+    ASSERT_EQ (2u, g_list_length (before));
+    g_list_free (before);
 
     xaccAccountBeginEdit (m_bank);
     xaccAccountDestroy (m_bank);

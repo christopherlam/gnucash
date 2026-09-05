@@ -2427,6 +2427,20 @@ record_reconciled_balance (Account *account, time64 date, gnc_numeric ending)
     if (xaccAccountGetReconcileChildrenStatus (account))
         return;
 
+    /* Re-reconciling a statement supersedes whatever the last attempt
+     * recorded for that date. Without this the old figure stays in the
+     * book as a permanently broken record that the user has no obvious
+     * way to explain or clear. */
+    auto existing = gnc_reconciled_balance_get_for_account (account);
+    for (auto n = existing; n; n = n->next)
+    {
+        auto old = GNC_RECONCILED_BALANCE (n->data);
+        if (gnc_reconciled_balance_get_date (old) ==
+            gnc_time64_get_day_neutral (date))
+            gnc_reconciled_balance_destroy (old);
+    }
+    g_list_free (existing);
+
     auto ba = gnc_reconciled_balance_new (gnc_get_current_book ());
     gnc_reconciled_balance_set_account (ba, account);
     gnc_reconciled_balance_set_date (ba, date);

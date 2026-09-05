@@ -588,6 +588,10 @@ book_callback (const char* tag, gpointer globaldata, gpointer data)
     {
         // Nothing needed here.
     }
+    else if (g_strcmp0 (tag, RECONCILED_BALANCE_TAG) == 0)
+    {
+        // Nothing needed here.
+    }
     else
     {
         struct file_backend be_data;

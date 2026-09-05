@@ -25,6 +25,7 @@
 #include <qofinstance-p.h>
 
 #include "Account.h"
+#include "Account.hpp"
 #include "Split.h"
 #include "Transaction.h"
 #include "gnc-reconciled-balance.h"
@@ -94,6 +95,19 @@ bump_generation (void)
 
 static void
 gnc_reconciled_balance_destroy_for_account (const Account *acc);
+
+/* A record is not an account, but what it says about one shows up in
+ * account-keyed places -- the account tree caches its cell strings per
+ * account, and only drops them on account events. Emitting a MODIFY on
+ * the account keeps those in step; nothing else notices the difference. */
+static void
+notify_account (GncReconciledBalance *ba)
+{
+    Account *acc = gnc_reconciled_balance_get_account (ba);
+
+    if (acc && !qof_instance_get_destroying (acc))
+        qof_event_gen (QOF_INSTANCE (acc), QOF_EVENT_MODIFY, nullptr);
+}
 
 static void
 reconciled_balance_event_handler (QofInstance *entity, QofEventId event_type,
@@ -336,7 +350,14 @@ gnc_reconciled_balance_destroy (GncReconciledBalance *ba)
     gnc_reconciled_balance_begin_edit (ba);
     qof_instance_set_dirty (&ba->inst);
     qof_instance_set_destroying (ba, TRUE);
+
+    /* Read the account before the commit frees the record. */
+    Account *acc = gnc_reconciled_balance_get_account (ba);
+
     gnc_reconciled_balance_commit_edit (ba);
+
+    if (acc && !qof_instance_get_destroying (acc))
+        qof_event_gen (QOF_INSTANCE (acc), QOF_EVENT_MODIFY, nullptr);
 }
 
 const GncGUID *
@@ -380,6 +401,7 @@ gnc_reconciled_balance_set_account (GncReconciledBalance *ba, Account *acc)
     gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
+    notify_account (ba);
 }
 
 time64
@@ -407,6 +429,7 @@ gnc_reconciled_balance_set_date (GncReconciledBalance *ba, time64 date)
     gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
+    notify_account (ba);
 }
 
 gnc_numeric
@@ -432,6 +455,7 @@ gnc_reconciled_balance_set_amount (GncReconciledBalance *ba, gnc_numeric amount)
     gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
+    notify_account (ba);
 }
 
 const char *
@@ -458,6 +482,7 @@ gnc_reconciled_balance_set_notes (GncReconciledBalance *ba, const char *notes)
     gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
+    notify_account (ba);
 }
 
 /* ================================================================ */
@@ -471,9 +496,11 @@ gnc_reconciled_balance_compute (Account *acc, time64 date)
     time64 end = gnc_time64_get_day_end (date);
     gnc_numeric total = gnc_numeric_zero ();
 
-    for (GList *n = xaccAccountGetSplitList (acc); n; n = n->next)
+    /* xaccAccountGetSplits hands back the account's own vector;
+     * xaccAccountGetSplitList would allocate a fresh GList on every
+     * call, and this runs on every account-tree redraw. */
+    for (Split *split : xaccAccountGetSplits (acc))
     {
-        Split *split = GNC_SPLIT (n->data);
         char state = xaccSplitGetReconcile (split);
 
         if (state != YREC && state != FREC)

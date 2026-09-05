@@ -9,10 +9,16 @@
       <column type="gint64"/>
       <!-- column-name recorded -->
       <column type="gchararray"/>
+      <!-- column-name recorded_num (sort key) -->
+      <column type="gdouble"/>
       <!-- column-name actual -->
       <column type="gchararray"/>
+      <!-- column-name actual_num (sort key) -->
+      <column type="gdouble"/>
       <!-- column-name difference -->
       <column type="gchararray"/>
+      <!-- column-name difference_num (sort key) -->
+      <column type="gdouble"/>
       <!-- column-name status_icon -->
       <column type="gchararray"/>
       <!-- column-name notes -->

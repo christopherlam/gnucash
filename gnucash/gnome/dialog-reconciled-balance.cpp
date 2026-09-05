@@ -52,8 +52,11 @@ enum ReconciledBalanceColumn
     COL_DATE,
     COL_DATE_INT64,             /* sort key for COL_DATE */
     COL_RECORDED,
+    COL_RECORDED_NUM,           /* sort key for COL_RECORDED */
     COL_ACTUAL,
+    COL_ACTUAL_NUM,             /* sort key for COL_ACTUAL */
     COL_DIFFERENCE,
+    COL_DIFFERENCE_NUM,         /* sort key for COL_DIFFERENCE */
     COL_STATUS_ICON,
     COL_NOTES,
     COL_RECORD,
@@ -143,9 +146,11 @@ setup_columns (ReconciledBalanceDialog *bad)
     gtk_tree_view_append_column (view, column);
 
     add_column (view, _("Date"), COL_DATE, COL_DATE_INT64, false);
-    add_column (view, _("Recorded"), COL_RECORDED, COL_RECORDED, true);
-    add_column (view, _("Actual"), COL_ACTUAL, COL_ACTUAL, true);
-    add_column (view, _("Difference"), COL_DIFFERENCE, COL_DIFFERENCE, true);
+    /* Sort on the numeric keys: the visible columns hold formatted
+     * strings, which sort lexicographically and put 100 before 20. */
+    add_column (view, _("Recorded"), COL_RECORDED, COL_RECORDED_NUM, true);
+    add_column (view, _("Actual"), COL_ACTUAL, COL_ACTUAL_NUM, true);
+    add_column (view, _("Difference"), COL_DIFFERENCE, COL_DIFFERENCE_NUM, true);
     add_column (view, _("Notes"), COL_NOTES, COL_NOTES, false);
 }
 
@@ -203,8 +208,12 @@ refresh_list (ReconciledBalanceDialog *bad)
                             COL_DATE, date_str.c_str(),
                             COL_DATE_INT64, static_cast<gint64>(date),
                             COL_RECORDED, recorded_str.c_str(),
+                            COL_RECORDED_NUM, gnc_numeric_to_double (recorded),
                             COL_ACTUAL, actual_str.c_str(),
+                            COL_ACTUAL_NUM, gnc_numeric_to_double (actual),
                             COL_DIFFERENCE, difference_str.c_str(),
+                            COL_DIFFERENCE_NUM,
+                            gnc_numeric_to_double (difference),
                             COL_STATUS_ICON,
                             broken ? "dialog-warning" : "emblem-default",
                             COL_NOTES, gnc_reconciled_balance_get_notes (ba),

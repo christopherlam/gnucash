@@ -49,8 +49,9 @@
 static const EntryVec col_table
 ({
     gnc_sql_make_table_entry<CT_GUID>("guid", 0, COL_NNUL | COL_PKEY, "guid"),
-    gnc_sql_make_table_entry<CT_ACCOUNTREF>("account_guid", 0, COL_NNUL,
-                                            "account"),
+    /* Not COL_NNUL: a record outlives the deletion of its account, and
+     * the writer omits the column entirely for a null reference. */
+    gnc_sql_make_table_entry<CT_ACCOUNTREF>("account_guid", 0, 0, "account"),
     gnc_sql_make_table_entry<CT_TIME>("date", 0, COL_NNUL, "date"),
     gnc_sql_make_table_entry<CT_NUMERIC>("amount", 0, COL_NNUL, "amount"),
     gnc_sql_make_table_entry<CT_STRING>("notes", RB_MAX_NOTES_LEN, 0, "notes"),
