@@ -53,7 +53,7 @@ set (engine_HEADERS
   engine-helpers.h
   gnc-accounting-period.h
   gnc-aqbanking-templates.h
-  gnc-balance-assertion.h
+  gnc-reconciled-balance.h
   gnc-budget.h
   gnc-commodity.h
   gnc-commodity.hpp
@@ -155,7 +155,7 @@ set (engine_SOURCES
   cashobjects.cpp
   gnc-accounting-period.c
   gnc-aqbanking-templates.cpp
-  gnc-balance-assertion.cpp
+  gnc-reconciled-balance.cpp
   gnc-budget.cpp
   gnc-commodity.cpp
   gnc-date.cpp

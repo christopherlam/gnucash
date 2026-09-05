@@ -56,7 +56,7 @@
 #include "gnc-gtk-utils.h"
 //#include "gnc-main-window.h"
 #include "gnc-plugin-page-register.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 #include "gnc-prefs.h"
 #include "gnc-ui.h"
 #include "gnc-ui-balances.h"
@@ -71,7 +71,7 @@
 #define WINDOW_RECONCILE_CM_CLASS "window-reconcile"
 #define GNC_PREF_AUTO_CC_PAYMENT        "auto-cc-payment"
 #define GNC_PREF_ALWAYS_REC_TO_TODAY    "always-reconcile-to-today"
-#define GNC_PREF_RECORD_BALANCE_ASSERTION "record-balance-assertion"
+#define GNC_PREF_RECORD_RECONCILED_BALANCE "record-reconciled-balance"
 
 
 /** STRUCTS *********************************************************/
@@ -2407,37 +2407,36 @@ find_payment_account(Account *account)
  * user actually agreed with the bank -- is discarded, and nothing can
  * afterwards answer "is that statement still reconciled?".
  *
- * The assertion is on the reconciled basis, which places each split by
- * its own reconcile date. An item written before the statement but
- * cleared on a later one carries that later date, so it stays out of
- * this sum and the assertion keeps holding as reconciling continues. It
- * fails only if a split belonging to this statement is later edited,
- * deleted or un-reconciled. */
+ * The sum places each split by its own reconcile date, so an item
+ * written before the statement but cleared on a later one carries that
+ * later date and stays out of this figure. The record therefore keeps
+ * holding as reconciling continues, and breaks only if a split
+ * belonging to this statement is later edited, deleted or
+ * un-reconciled. */
 static void
-record_balance_assertion (Account *account, time64 date, gnc_numeric ending)
+record_reconciled_balance (Account *account, time64 date, gnc_numeric ending)
 {
     if (!gnc_prefs_get_bool (GNC_PREFS_GROUP_RECONCILE,
-                             GNC_PREF_RECORD_BALANCE_ASSERTION))
+                             GNC_PREF_RECORD_RECONCILED_BALANCE))
         return;
 
     /* A reconciliation that includes child accounts agrees a balance for
-     * the whole subtree, which is not something an assertion about one
+     * the whole subtree, which is not something a record about one
      * account can express. Better to record nothing than something
      * false. */
     if (xaccAccountGetReconcileChildrenStatus (account))
         return;
 
-    auto ba = gnc_balance_assertion_new (gnc_get_current_book ());
-    gnc_balance_assertion_set_account (ba, account);
-    gnc_balance_assertion_set_date (ba, date);
+    auto ba = gnc_reconciled_balance_new (gnc_get_current_book ());
+    gnc_reconciled_balance_set_account (ba, account);
+    gnc_reconciled_balance_set_date (ba, date);
     /* new_ending has already had any display reversal undone, so it is
      * in the engine's sign convention, which is what the setter wants. */
-    gnc_balance_assertion_set_amount (ba, ending);
-    gnc_balance_assertion_set_basis (ba, GNC_BALANCE_ASSERTION_BASIS_RECONCILED);
+    gnc_reconciled_balance_set_amount (ba, ending);
 
     auto datebuf = qof_print_date (date);
     auto notes = g_strdup_printf (_("Reconciled to statement of %s"), datebuf);
-    gnc_balance_assertion_set_notes (ba, notes);
+    gnc_reconciled_balance_set_notes (ba, notes);
     g_free (notes);
     g_free (datebuf);
 }
@@ -2493,7 +2492,7 @@ recnFinishCB (GSimpleAction *simple,
     xaccAccountClearReconcilePostpone (account);
     xaccAccountSetReconcileLastDate (account, date);
 
-    record_balance_assertion (account, date, recnData->new_ending);
+    record_reconciled_balance (account, date, recnData->new_ending);
 
     if (auto_payment &&
             (xaccAccountGetType (account) == ACCT_TYPE_CREDIT) &&

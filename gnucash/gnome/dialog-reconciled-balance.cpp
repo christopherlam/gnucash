@@ -1,5 +1,5 @@
 /********************************************************************\
- * dialog-balance-assertion.cpp -- balance assertion dialog          *
+ * dialog-reconciled-balance.cpp -- reconciled balance dialog          *
  *                                                                  *
  * This program is free software; you can redistribute it and/or    *
  * modify it under the terms of the GNU General Public License as   *
@@ -28,11 +28,11 @@
 #include <string>
 #include <vector>
 
-#include "dialog-balance-assertion.h"
+#include "dialog-reconciled-balance.h"
 
 #include "dialog-utils.h"
 #include "gnc-amount-edit.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 #include "gnc-component-manager.h"
 #include "gnc-date-edit.h"
 #include "gnc-engine.h"
@@ -43,30 +43,28 @@
 #include "gnc-ui-balances.h"
 #include "gnc-ui-util.h"
 
-#define DIALOG_BALANCE_ASSERTION_CM_CLASS "dialog-balance-assertion"
-#define GNC_PREFS_GROUP "dialogs.balance-assertion"
+#define DIALOG_RECONCILED_BALANCE_CM_CLASS "dialog-reconciled-balance"
+#define GNC_PREFS_GROUP "dialogs.reconciled-balance"
 
-/* Columns of the list store defined in dialog-balance-assertion.glade */
-enum BalanceAssertionColumn
+/* Columns of the list store defined in dialog-reconciled-balance.glade */
+enum ReconciledBalanceColumn
 {
     COL_DATE,
     COL_DATE_INT64,             /* sort key for COL_DATE */
-    COL_ASSERTED,
+    COL_RECORDED,
     COL_ACTUAL,
     COL_DIFFERENCE,
-    COL_BASIS,
     COL_STATUS_ICON,
     COL_NOTES,
-    COL_ASSERTION,
+    COL_RECORD,
 };
 
-struct BalanceAssertionDialog
+struct ReconciledBalanceDialog
 {
     GtkWidget *dialog = nullptr;
     GtkWidget *view = nullptr;
     GtkWidget *date_edit = nullptr;
     GtkWidget *amount_edit = nullptr;
-    GtkWidget *basis_combo = nullptr;
     GtkWidget *notes_entry = nullptr;
     GtkWidget *remove_button = nullptr;
     GtkListStore *store = nullptr;
@@ -86,11 +84,11 @@ static QofLogModule log_module = GNC_MOD_GUI;
  * they must not be mangled. */
 extern "C"
 {
-void gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data);
-void gnc_balance_assertion_dialog_remove_cb (GtkWidget *widget, gpointer data);
-void gnc_balance_assertion_dialog_selection_changed_cb (GtkTreeSelection *sel,
+void gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data);
+void gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data);
+void gnc_reconciled_balance_dialog_selection_changed_cb (GtkTreeSelection *sel,
                                                         gpointer data);
-void gnc_balance_assertion_dialog_response_cb (GtkDialog *dialog, gint response,
+void gnc_reconciled_balance_dialog_response_cb (GtkDialog *dialog, gint response,
                                                gpointer data);
 }
 
@@ -112,14 +110,6 @@ print_date (time64 date)
     return buf;
 }
 
-static const char *
-basis_label (GncBalanceAssertionBasis basis)
-{
-    return basis == GNC_BALANCE_ASSERTION_BASIS_RECONCILED
-        ? _("Reconciled")
-        : _("Posted");
-}
-
 static void
 add_column (GtkTreeView *view, const char *title, int column_id,
             int sort_column_id, bool right_align)
@@ -139,7 +129,7 @@ add_column (GtkTreeView *view, const char *title, int column_id,
 }
 
 static void
-setup_columns (BalanceAssertionDialog *bad)
+setup_columns (ReconciledBalanceDialog *bad)
 {
     auto view = GTK_TREE_VIEW(bad->view);
 
@@ -153,29 +143,28 @@ setup_columns (BalanceAssertionDialog *bad)
     gtk_tree_view_append_column (view, column);
 
     add_column (view, _("Date"), COL_DATE, COL_DATE_INT64, false);
-    add_column (view, _("Asserted"), COL_ASSERTED, COL_ASSERTED, true);
+    add_column (view, _("Recorded"), COL_RECORDED, COL_RECORDED, true);
     add_column (view, _("Actual"), COL_ACTUAL, COL_ACTUAL, true);
     add_column (view, _("Difference"), COL_DIFFERENCE, COL_DIFFERENCE, true);
-    add_column (view, _("Basis"), COL_BASIS, COL_BASIS, false);
     add_column (view, _("Notes"), COL_NOTES, COL_NOTES, false);
 }
 
-static GncBalanceAssertion *
-get_selected (BalanceAssertionDialog *bad)
+static GncReconciledBalance *
+get_selected (ReconciledBalanceDialog *bad)
 {
     GtkTreeModel *model;
     GtkTreeIter iter;
-    GncBalanceAssertion *ba = nullptr;
+    GncReconciledBalance *ba = nullptr;
 
     auto selection = gtk_tree_view_get_selection (GTK_TREE_VIEW(bad->view));
     if (gtk_tree_selection_get_selected (selection, &model, &iter))
-        gtk_tree_model_get (model, &iter, COL_ASSERTION, &ba, -1);
+        gtk_tree_model_get (model, &iter, COL_RECORD, &ba, -1);
 
     return ba;
 }
 
 static void
-refresh_list (BalanceAssertionDialog *bad)
+refresh_list (ReconciledBalanceDialog *bad)
 {
     gtk_list_store_clear (bad->store);
 
@@ -184,17 +173,17 @@ refresh_list (BalanceAssertionDialog *bad)
 
     auto pinfo = gnc_account_print_info (bad->account, TRUE);
     auto reverse = gnc_reverse_balance (bad->account);
-    auto assertions = gnc_balance_assertion_get_for_account (bad->account);
+    auto records = gnc_reconciled_balance_get_for_account (bad->account);
 
-    for (auto node = assertions; node; node = node->next)
+    for (auto node = records; node; node = node->next)
     {
-        auto ba = GNC_BALANCE_ASSERTION(node->data);
-        auto failing = gnc_balance_assertion_is_failing (ba);
-        auto date = gnc_balance_assertion_get_date (ba);
+        auto ba = GNC_RECONCILED_BALANCE(node->data);
+        auto broken = gnc_reconciled_balance_is_broken (ba);
+        auto date = gnc_reconciled_balance_get_date (ba);
 
-        auto asserted = gnc_ui_balance_assertion_get_display_amount (ba);
-        auto actual = gnc_balance_assertion_get_actual (ba);
-        auto difference = gnc_balance_assertion_get_delta (ba);
+        auto recorded = gnc_ui_reconciled_balance_get_display_amount (ba);
+        auto actual = gnc_reconciled_balance_get_actual (ba);
+        auto difference = gnc_reconciled_balance_get_delta (ba);
 
         if (reverse)
         {
@@ -203,9 +192,9 @@ refresh_list (BalanceAssertionDialog *bad)
         }
 
         auto date_str = print_date (date);
-        auto asserted_str = print_amount (asserted, pinfo);
+        auto recorded_str = print_amount (recorded, pinfo);
         auto actual_str = print_amount (actual, pinfo);
-        auto difference_str = failing ? print_amount (difference, pinfo)
+        auto difference_str = broken ? print_amount (difference, pinfo)
                                       : std::string {};
 
         GtkTreeIter iter;
@@ -213,37 +202,34 @@ refresh_list (BalanceAssertionDialog *bad)
         gtk_list_store_set (bad->store, &iter,
                             COL_DATE, date_str.c_str(),
                             COL_DATE_INT64, static_cast<gint64>(date),
-                            COL_ASSERTED, asserted_str.c_str(),
+                            COL_RECORDED, recorded_str.c_str(),
                             COL_ACTUAL, actual_str.c_str(),
                             COL_DIFFERENCE, difference_str.c_str(),
-                            COL_BASIS,
-                            basis_label (gnc_balance_assertion_get_basis (ba)),
                             COL_STATUS_ICON,
-                            failing ? "dialog-warning" : "emblem-default",
-                            COL_NOTES, gnc_balance_assertion_get_notes (ba),
-                            COL_ASSERTION, ba,
+                            broken ? "dialog-warning" : "emblem-default",
+                            COL_NOTES, gnc_reconciled_balance_get_notes (ba),
+                            COL_RECORD, ba,
                             -1);
     }
 
-    g_list_free (assertions);
+    g_list_free (records);
 
     gtk_widget_set_sensitive (bad->remove_button, get_selected (bad) != nullptr);
 }
 
-/* Fill the entry row with the account's balance on the chosen date, so
- * that "Add" without further typing records what GnuCash already
- * believes. The user overtypes the figure from their statement; if the
- * two agree there is nothing to do, and if they don't the assertion is
- * exactly the record of that disagreement. */
+/* Fill the entry row with the reconciled balance GnuCash currently has
+ * for the chosen date, so that "Add" without further typing records
+ * what it already believes. The user overtypes the figure from their
+ * statement; if the two agree there is nothing to do, and if they don't
+ * the record is exactly the record of that disagreement. */
 static void
-propose_balance (BalanceAssertionDialog *bad)
+propose_balance (ReconciledBalanceDialog *bad)
 {
     if (!bad->account)
         return;
 
     auto date = gnc_date_edit_get_date (GNC_DATE_EDIT(bad->date_edit));
-    auto balance = xaccAccountGetBalanceAsOfDate (bad->account,
-                                                  gnc_time64_get_day_end (date));
+    auto balance = gnc_reconciled_balance_compute (bad->account, date);
 
     if (gnc_reverse_balance (bad->account))
         balance = gnc_numeric_neg (balance);
@@ -257,23 +243,13 @@ propose_balance (BalanceAssertionDialog *bad)
 static void
 date_changed_cb (GtkWidget *widget, gpointer data)
 {
-    propose_balance (static_cast<BalanceAssertionDialog*>(data));
-}
-
-static GncBalanceAssertionBasis
-selected_basis (BalanceAssertionDialog *bad)
-{
-    auto id = gtk_combo_box_get_active_id (GTK_COMBO_BOX(bad->basis_combo));
-
-    return g_strcmp0 (id, "reconciled") == 0
-        ? GNC_BALANCE_ASSERTION_BASIS_RECONCILED
-        : GNC_BALANCE_ASSERTION_BASIS_TOTAL;
+    propose_balance (static_cast<ReconciledBalanceDialog*>(data));
 }
 
 void
-gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data)
+gnc_reconciled_balance_dialog_add_cb (GtkWidget *widget, gpointer data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
 
     if (!bad->account)
         return;
@@ -288,14 +264,13 @@ gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data)
         return;
     }
 
-    auto ba = gnc_balance_assertion_new (gnc_get_current_book ());
-    gnc_balance_assertion_set_account (ba, bad->account);
-    gnc_balance_assertion_set_date
+    auto ba = gnc_reconciled_balance_new (gnc_get_current_book ());
+    gnc_reconciled_balance_set_account (ba, bad->account);
+    gnc_reconciled_balance_set_date
         (ba, gnc_date_edit_get_date (GNC_DATE_EDIT(bad->date_edit)));
-    gnc_balance_assertion_set_basis (ba, selected_basis (bad));
-    gnc_ui_balance_assertion_set_display_amount
+    gnc_ui_reconciled_balance_set_display_amount
         (ba, gnc_amount_edit_get_amount (GNC_AMOUNT_EDIT(bad->amount_edit)));
-    gnc_balance_assertion_set_notes
+    gnc_reconciled_balance_set_notes
         (ba, gtk_entry_get_text (GTK_ENTRY(bad->notes_entry)));
 
     gtk_entry_set_text (GTK_ENTRY(bad->notes_entry), "");
@@ -304,31 +279,31 @@ gnc_balance_assertion_dialog_add_cb (GtkWidget *widget, gpointer data)
 }
 
 void
-gnc_balance_assertion_dialog_remove_cb (GtkWidget *widget, gpointer data)
+gnc_reconciled_balance_dialog_remove_cb (GtkWidget *widget, gpointer data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
 
     if (auto ba = get_selected (bad))
     {
-        gnc_balance_assertion_destroy (ba);
+        gnc_reconciled_balance_destroy (ba);
         refresh_list (bad);
     }
 }
 
 void
-gnc_balance_assertion_dialog_selection_changed_cb (GtkTreeSelection *selection,
+gnc_reconciled_balance_dialog_selection_changed_cb (GtkTreeSelection *selection,
                                                    gpointer data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
 
     gtk_widget_set_sensitive (bad->remove_button, get_selected (bad) != nullptr);
 }
 
 void
-gnc_balance_assertion_dialog_response_cb (GtkDialog *dialog, gint response,
+gnc_reconciled_balance_dialog_response_cb (GtkDialog *dialog, gint response,
                                           gpointer data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(data);
 
     gnc_save_window_size (GNC_PREFS_GROUP, GTK_WINDOW(bad->dialog));
     gnc_close_gui_component (bad->component_id);
@@ -340,7 +315,7 @@ gnc_balance_assertion_dialog_response_cb (GtkDialog *dialog, gint response,
 static void
 refresh_handler (GHashTable *changes, gpointer user_data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(user_data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(user_data);
 
     /* The account may have been deleted from under us, which would
      * leave bad->account dangling -- so resolve the guid, never the
@@ -358,7 +333,7 @@ refresh_handler (GHashTable *changes, gpointer user_data)
 static void
 close_handler (gpointer user_data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(user_data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(user_data);
 
     gnc_unregister_gui_component (bad->component_id);
     gtk_widget_destroy (bad->dialog);
@@ -368,49 +343,48 @@ close_handler (gpointer user_data)
 static gboolean
 find_by_account (gpointer find_data, gpointer user_data)
 {
-    auto bad = static_cast<BalanceAssertionDialog*>(user_data);
+    auto bad = static_cast<ReconciledBalanceDialog*>(user_data);
 
     return bad && bad->account == find_data;
 }
 
 /* =================================================================== */
 
-static BalanceAssertionDialog *
+static ReconciledBalanceDialog *
 create_dialog (GtkWindow *parent, Account *account)
 {
-    auto bad = std::make_unique<BalanceAssertionDialog>();
+    auto bad = std::make_unique<ReconciledBalanceDialog>();
     bad->account = account;
     bad->acct_guid = *xaccAccountGetGUID (account);
     bad->session = gnc_get_current_session ();
 
     auto builder = gtk_builder_new ();
-    gnc_builder_add_from_file (builder, "dialog-balance-assertion.glade",
-                               "assertion_liststore");
-    gnc_builder_add_from_file (builder, "dialog-balance-assertion.glade",
-                               "balance_assertion_dialog");
+    gnc_builder_add_from_file (builder, "dialog-reconciled-balance.glade",
+                               "reconciled_balance_liststore");
+    gnc_builder_add_from_file (builder, "dialog-reconciled-balance.glade",
+                               "reconciled_balance_dialog");
 
     auto get_widget = [builder](const char *name)
     {
         return GTK_WIDGET(gtk_builder_get_object (builder, name));
     };
 
-    bad->dialog = get_widget ("balance_assertion_dialog");
-    bad->view = get_widget ("ba_treeview");
-    bad->notes_entry = get_widget ("ba_notes_entry");
-    bad->basis_combo = get_widget ("ba_basis_combo");
-    bad->remove_button = get_widget ("ba_remove_button");
+    bad->dialog = get_widget ("reconciled_balance_dialog");
+    bad->view = get_widget ("rb_treeview");
+    bad->notes_entry = get_widget ("rb_notes_entry");
+    bad->remove_button = get_widget ("rb_remove_button");
     bad->store = GTK_LIST_STORE(gtk_builder_get_object (builder,
-                                                        "assertion_liststore"));
+                                                        "reconciled_balance_liststore"));
 
     auto fullname = gnc_account_get_full_name (account);
     std::string name {fullname};
     g_free (fullname);
 
-    auto title = g_strdup_printf (_("Balance Assertions — %s"), name.c_str());
+    auto title = g_strdup_printf (_("Reconciled Balances — %s"), name.c_str());
     gtk_window_set_title (GTK_WINDOW(bad->dialog), title);
     g_free (title);
 
-    gtk_label_set_text (GTK_LABEL(get_widget ("ba_account_label")),
+    gtk_label_set_text (GTK_LABEL(get_widget ("rb_account_label")),
                         name.c_str());
 
     if (parent)
@@ -418,11 +392,11 @@ create_dialog (GtkWindow *parent, Account *account)
 
     /* Date */
     bad->date_edit = gnc_date_edit_new (gnc_time (nullptr), FALSE, FALSE);
-    gtk_box_pack_start (GTK_BOX(get_widget ("ba_date_box")), bad->date_edit,
+    gtk_box_pack_start (GTK_BOX(get_widget ("rb_date_box")), bad->date_edit,
                         TRUE, TRUE, 0);
     gtk_widget_show (bad->date_edit);
     gnc_date_make_mnemonic_target (GNC_DATE_EDIT(bad->date_edit),
-                                   get_widget ("ba_date_label"));
+                                   get_widget ("rb_date_label"));
     g_signal_connect (G_OBJECT(bad->date_edit), "date_changed",
                       G_CALLBACK(date_changed_cb), bad.get());
 
@@ -434,17 +408,17 @@ create_dialog (GtkWindow *parent, Account *account)
                                     gnc_account_print_info (account, FALSE));
     gnc_amount_edit_set_fraction (GNC_AMOUNT_EDIT(bad->amount_edit),
                                   xaccAccountGetCommoditySCU (account));
-    gtk_box_pack_start (GTK_BOX(get_widget ("ba_amount_box")), bad->amount_edit,
+    gtk_box_pack_start (GTK_BOX(get_widget ("rb_amount_box")), bad->amount_edit,
                         TRUE, TRUE, 0);
     gtk_widget_show (bad->amount_edit);
     gnc_amount_edit_make_mnemonic_target (GNC_AMOUNT_EDIT(bad->amount_edit),
-                                          get_widget ("ba_amount_label"));
+                                          get_widget ("rb_amount_label"));
 
     setup_columns (bad.get());
 
     auto selection = gtk_tree_view_get_selection (GTK_TREE_VIEW(bad->view));
     g_signal_connect (G_OBJECT(selection), "changed",
-                      G_CALLBACK(gnc_balance_assertion_dialog_selection_changed_cb),
+                      G_CALLBACK(gnc_reconciled_balance_dialog_selection_changed_cb),
                       bad.get());
 
     gtk_builder_connect_signals_full (builder, gnc_builder_connect_full_func,
@@ -452,16 +426,17 @@ create_dialog (GtkWindow *parent, Account *account)
     g_object_unref (G_OBJECT(builder));
 
     bad->component_id =
-        gnc_register_gui_component (DIALOG_BALANCE_ASSERTION_CM_CLASS,
+        gnc_register_gui_component (DIALOG_RECONCILED_BALANCE_CM_CLASS,
                                     refresh_handler, close_handler, bad.get());
     gnc_gui_component_set_session (bad->component_id, bad->session);
 
-    /* Anything that moves a balance can flip an assertion, so watch
-     * transactions and splits as well as the assertions themselves. */
+    /* Anything that moves a balance, or changes what is reconciled, can
+     * break a record -- so watch transactions and splits as well as the
+     * records themselves. */
     const QofEventId all_events =
         QOF_EVENT_CREATE | QOF_EVENT_MODIFY | QOF_EVENT_DESTROY;
 
-    for (auto type : { GNC_ID_BALANCE_ASSERTION, GNC_ID_TRANS, GNC_ID_SPLIT })
+    for (auto type : { GNC_ID_RECONCILED_BALANCE, GNC_ID_TRANS, GNC_ID_SPLIT })
         gnc_gui_component_watch_entity_type (bad->component_id, type,
                                              all_events);
 
@@ -479,8 +454,8 @@ present_dialog (GtkWindow *parent, Account *account, bool have_date, time64 date
 {
     g_return_if_fail (GNC_IS_ACCOUNT(account));
 
-    auto bad = static_cast<BalanceAssertionDialog*>
-        (gnc_find_first_gui_component (DIALOG_BALANCE_ASSERTION_CM_CLASS,
+    auto bad = static_cast<ReconciledBalanceDialog*>
+        (gnc_find_first_gui_component (DIALOG_RECONCILED_BALANCE_CM_CLASS,
                                        find_by_account, account));
     if (!bad)
         bad = create_dialog (parent, account);
@@ -496,7 +471,7 @@ present_dialog (GtkWindow *parent, Account *account, bool have_date, time64 date
 }
 
 void
-gnc_balance_assertion_dialog (GtkWindow *parent, Account *account)
+gnc_reconciled_balance_dialog (GtkWindow *parent, Account *account)
 {
     ENTER (" ");
     present_dialog (parent, account, false, 0);
@@ -504,7 +479,7 @@ gnc_balance_assertion_dialog (GtkWindow *parent, Account *account)
 }
 
 void
-gnc_balance_assertion_dialog_for_date (GtkWindow *parent, Account *account,
+gnc_reconciled_balance_dialog_for_date (GtkWindow *parent, Account *account,
                                        time64 date)
 {
     ENTER (" ");

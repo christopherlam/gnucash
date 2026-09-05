@@ -762,7 +762,7 @@ gnc_tree_view_account_new_with_root (Account *root, gboolean show_root)
     GtkTreePath *virtual_root_path = NULL;
     const gchar *sample_type, *sample_commodity;
     GtkTreeViewColumn *tax_info_column, *acc_color_column, *acc_balance_limit_column;
-    GtkTreeViewColumn *acc_balance_assertion_column;
+    GtkTreeViewColumn *acc_reconciled_balance_column;
     GtkCellRenderer *renderer;
     GList *col_list = NULL, *node = NULL;
 
@@ -977,21 +977,21 @@ gnc_tree_view_account_new_with_root (Account *root, gboolean show_root)
     /* Also add the full title to the column header as a tooltip */
     gtk_widget_set_tooltip_text (gtk_tree_view_column_get_button (acc_balance_limit_column), _("Balance Limit"));
 
-    acc_balance_assertion_column
+    acc_reconciled_balance_column
         = gnc_tree_view_add_pix_column (GNC_TREE_VIEW(view),
-                                        C_("Column header for 'Balance Assertion'", "A"),
-                                        "account-balance-assertion",
+                                        C_("Column header for 'Reconciled Balance'", "R"),
+                                        "account-reconciled-balance",
                                         "xx",
-                                        GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION,
+                                        GNC_TREE_MODEL_ACCOUNT_COL_RECONCILED_BALANCE_STATUS,
                                         GNC_TREE_VIEW_COLUMN_VISIBLE_ALWAYS,
                                         NULL);
 
     /* Add the full title to the object for menu creation */
-    g_object_set_data_full(G_OBJECT(acc_balance_assertion_column), REAL_TITLE,
-                           g_strdup(_("Balance Assertion")), g_free);
+    g_object_set_data_full(G_OBJECT(acc_reconciled_balance_column), REAL_TITLE,
+                           g_strdup(_("Reconciled Balance")), g_free);
 
     /* Also add the full title to the column header as a tooltip */
-    gtk_widget_set_tooltip_text (gtk_tree_view_column_get_button (acc_balance_assertion_column), _("Balance Assertion"));
+    gtk_widget_set_tooltip_text (gtk_tree_view_column_get_button (acc_reconciled_balance_column), _("Reconciled Balance"));
 
     view->notes_column
         = gnc_tree_view_add_text_view_column(GNC_TREE_VIEW(view), _("Notes"), "notes", NULL,
@@ -2923,9 +2923,9 @@ gnc_tree_view_tooltip_cb (GtkWidget *widget, gint x, gint y, gboolean keyboard_t
                                 GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_LIMIT_EXPLANATION, &ttip,
                                 -1);
             break;
-        case GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION:
+        case GNC_TREE_MODEL_ACCOUNT_COL_RECONCILED_BALANCE_STATUS:
             gtk_tree_model_get (model, &iter,
-                                GNC_TREE_MODEL_ACCOUNT_COL_BALANCE_ASSERTION_EXPLANATION, &ttip,
+                                GNC_TREE_MODEL_ACCOUNT_COL_RECONCILED_BALANCE_STATUS_TIP, &ttip,
                                 -1);
             break;
         default:

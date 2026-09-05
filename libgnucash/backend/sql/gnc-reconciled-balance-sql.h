@@ -1,5 +1,5 @@
 /********************************************************************
- * gnc-balance-assertion-sql.h: load and save data to SQL           *
+ * gnc-reconciled-balance-sql.h: load and save data to SQL           *
  *                                                                  *
  * This program is free software; you can redistribute it and/or    *
  * modify it under the terms of the GNU General Public License as   *
@@ -18,22 +18,22 @@
  * 51 Franklin Street, Fifth Floor    Fax:    +1-617-542-2652       *
  * Boston, MA  02110-1301,  USA       gnu@gnu.org                   *
 \********************************************************************/
-/** @file gnc-balance-assertion-sql.h
- *  @brief load and save balance assertions to SQL
+/** @file gnc-reconciled-balance-sql.h
+ *  @brief load and save reconciled balances to SQL
  */
 
-#ifndef GNC_BALANCE_ASSERTION_SQL_H
-#define GNC_BALANCE_ASSERTION_SQL_H
+#ifndef GNC_RECONCILED_BALANCE_SQL_H
+#define GNC_RECONCILED_BALANCE_SQL_H
 
 #include "gnc-sql-object-backend.hpp"
 
-class GncSqlBalanceAssertionBackend : public GncSqlObjectBackend
+class GncSqlReconciledBalanceBackend : public GncSqlObjectBackend
 {
 public:
-    GncSqlBalanceAssertionBackend();
+    GncSqlReconciledBalanceBackend();
     void load_all (GncSqlBackend*) override;
     void create_tables (GncSqlBackend*) override;
     bool write (GncSqlBackend*) override;
 };
 
-#endif /* GNC_BALANCE_ASSERTION_SQL_H */
+#endif /* GNC_RECONCILED_BALANCE_SQL_H */

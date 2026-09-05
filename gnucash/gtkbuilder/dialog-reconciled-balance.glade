@@ -1,34 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <requires lib="gtk+" version="3.22"/>
-  <object class="GtkListStore" id="assertion_liststore">
+  <object class="GtkListStore" id="reconciled_balance_liststore">
     <columns>
       <!-- column-name date_string -->
       <column type="gchararray"/>
       <!-- column-name date_int64 (sort key) -->
       <column type="gint64"/>
-      <!-- column-name asserted -->
+      <!-- column-name recorded -->
       <column type="gchararray"/>
       <!-- column-name actual -->
       <column type="gchararray"/>
       <!-- column-name difference -->
       <column type="gchararray"/>
-      <!-- column-name basis -->
-      <column type="gchararray"/>
       <!-- column-name status_icon -->
       <column type="gchararray"/>
       <!-- column-name notes -->
       <column type="gchararray"/>
-      <!-- column-name assertion pointer -->
+      <!-- column-name record pointer -->
       <column type="gpointer"/>
     </columns>
   </object>
-  <object class="GtkDialog" id="balance_assertion_dialog">
+  <object class="GtkDialog" id="reconciled_balance_dialog">
     <property name="can-focus">False</property>
     <property name="default-width">600</property>
     <property name="default-height">400</property>
     <property name="type-hint">dialog</property>
-    <signal name="response" handler="gnc_balance_assertion_dialog_response_cb" swapped="no"/>
+    <signal name="response" handler="gnc_reconciled_balance_dialog_response_cb" swapped="no"/>
     <child internal-child="vbox">
       <object class="GtkBox">
         <property name="visible">True</property>
@@ -41,7 +39,7 @@
             <property name="can-focus">False</property>
             <property name="layout-style">end</property>
             <child>
-              <object class="GtkButton" id="ba_close_button">
+              <object class="GtkButton" id="rb_close_button">
                 <property name="label" translatable="yes">_Close</property>
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
@@ -62,7 +60,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkLabel" id="ba_account_label">
+          <object class="GtkLabel" id="rb_account_label">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="margin-start">6</property>
@@ -80,7 +78,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkScrolledWindow" id="ba_scrolled_window">
+          <object class="GtkScrolledWindow" id="rb_scrolled_window">
             <property name="visible">True</property>
             <property name="can-focus">True</property>
             <property name="margin-start">6</property>
@@ -89,13 +87,13 @@
             <property name="vscrollbar-policy">automatic</property>
             <property name="shadow-type">in</property>
             <child>
-              <object class="GtkTreeView" id="ba_treeview">
+              <object class="GtkTreeView" id="rb_treeview">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
-                <property name="model">assertion_liststore</property>
+                <property name="model">reconciled_balance_liststore</property>
                 <property name="enable-search">False</property>
                 <child internal-child="selection">
-                  <object class="GtkTreeSelection" id="ba_treeview_selection"/>
+                  <object class="GtkTreeSelection" id="rb_treeview_selection"/>
                 </child>
               </object>
             </child>
@@ -107,7 +105,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkGrid" id="ba_entry_grid">
+          <object class="GtkGrid" id="rb_entry_grid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="margin-start">6</property>
@@ -116,7 +114,7 @@
             <property name="row-spacing">6</property>
             <property name="column-spacing">6</property>
             <child>
-              <object class="GtkLabel" id="ba_date_label">
+              <object class="GtkLabel" id="rb_date_label">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="label" translatable="yes">_Date</property>
@@ -129,7 +127,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkBox" id="ba_date_box">
+              <object class="GtkBox" id="rb_date_box">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="hexpand">True</property>
@@ -140,10 +138,10 @@
               </packing>
             </child>
             <child>
-              <object class="GtkLabel" id="ba_amount_label">
+              <object class="GtkLabel" id="rb_amount_label">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_Balance</property>
+                <property name="label" translatable="yes">Reconciled _balance</property>
                 <property name="use-underline">True</property>
                 <property name="xalign">1</property>
               </object>
@@ -153,7 +151,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkBox" id="ba_amount_box">
+              <object class="GtkBox" id="rb_amount_box">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="hexpand">True</property>
@@ -164,52 +162,21 @@
               </packing>
             </child>
             <child>
-              <object class="GtkLabel" id="ba_basis_label">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Balance _of</property>
-                <property name="use-underline">True</property>
-                <property name="mnemonic-widget">ba_basis_combo</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing>
-                <property name="left-attach">0</property>
-                <property name="top-attach">1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkComboBoxText" id="ba_basis_combo">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="active">0</property>
-                <property name="tooltip-text" translatable="yes">Which balance the figure is: everything posted on or before the date, or only what had been reconciled by then.</property>
-                <items>
-                  <item id="total" translatable="yes">Everything posted</item>
-                  <item id="reconciled" translatable="yes">Reconciled only</item>
-                </items>
-              </object>
-              <packing>
-                <property name="left-attach">1</property>
-                <property name="top-attach">1</property>
-                <property name="width">3</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="ba_notes_label">
+              <object class="GtkLabel" id="rb_notes_label">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="label" translatable="yes">_Notes</property>
                 <property name="use-underline">True</property>
-                <property name="mnemonic-widget">ba_notes_entry</property>
+                <property name="mnemonic-widget">rb_notes_entry</property>
                 <property name="xalign">1</property>
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">2</property>
+                <property name="top-attach">1</property>
               </packing>
             </child>
             <child>
-              <object class="GtkEntry" id="ba_notes_entry">
+              <object class="GtkEntry" id="rb_notes_entry">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <property name="hexpand">True</property>
@@ -217,26 +184,26 @@
               </object>
               <packing>
                 <property name="left-attach">1</property>
-                <property name="top-attach">2</property>
+                <property name="top-attach">1</property>
                 <property name="width">3</property>
               </packing>
             </child>
             <child>
-              <object class="GtkButtonBox" id="ba_button_box">
+              <object class="GtkButtonBox" id="rb_button_box">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="spacing">6</property>
                 <property name="layout-style">end</property>
                 <child>
-                  <object class="GtkButton" id="ba_remove_button">
+                  <object class="GtkButton" id="rb_remove_button">
                     <property name="label" translatable="yes">_Remove</property>
                     <property name="visible">True</property>
                     <property name="can-focus">True</property>
                     <property name="receives-default">True</property>
                     <property name="use-underline">True</property>
                     <property name="sensitive">False</property>
-                    <property name="tooltip-text" translatable="yes">Remove the selected balance assertion</property>
-                    <signal name="clicked" handler="gnc_balance_assertion_dialog_remove_cb" swapped="no"/>
+                    <property name="tooltip-text" translatable="yes">Remove the selected record</property>
+                    <signal name="clicked" handler="gnc_reconciled_balance_dialog_remove_cb" swapped="no"/>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -245,14 +212,14 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkButton" id="ba_add_button">
+                  <object class="GtkButton" id="rb_add_button">
                     <property name="label" translatable="yes">_Add</property>
                     <property name="visible">True</property>
                     <property name="can-focus">True</property>
                     <property name="receives-default">True</property>
                     <property name="use-underline">True</property>
-                    <property name="tooltip-text" translatable="yes">Record that the account had this balance on this date</property>
-                    <signal name="clicked" handler="gnc_balance_assertion_dialog_add_cb" swapped="no"/>
+                    <property name="tooltip-text" translatable="yes">Record that the account reconciled to this balance on this date</property>
+                    <signal name="clicked" handler="gnc_reconciled_balance_dialog_add_cb" swapped="no"/>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -263,7 +230,7 @@
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">3</property>
+                <property name="top-attach">2</property>
                 <property name="width">4</property>
               </packing>
             </child>
@@ -277,7 +244,7 @@
       </object>
     </child>
     <action-widgets>
-      <action-widget response="-7">ba_close_button</action-widget>
+      <action-widget response="-7">rb_close_button</action-widget>
     </action-widgets>
   </object>
 </interface>

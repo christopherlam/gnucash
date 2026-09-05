@@ -61,7 +61,6 @@ gnucash/gnome/assistant-stock-transaction.cpp
 gnucash/gnome/business-gnome-utils.c
 gnucash/gnome/business-options-gnome.cpp
 gnucash/gnome/business-urls.c
-gnucash/gnome/dialog-balance-assertion.cpp
 gnucash/gnome/dialog-billterms.c
 gnucash/gnome/dialog-choose-owner.c
 gnucash/gnome/dialog-commodities.cpp
@@ -84,6 +83,7 @@ gnucash/gnome/dialog-price-edit-db.cpp
 gnucash/gnome/dialog-price-editor.c
 gnucash/gnome/dialog-print-check.c
 gnucash/gnome/dialog-progress.c
+gnucash/gnome/dialog-reconciled-balance.cpp
 gnucash/gnome/dialog-report-column-view.cpp
 gnucash/gnome/dialog-report-style-sheet.cpp
 gnucash/gnome/dialog-sx-editor.c
@@ -246,7 +246,6 @@ gnucash/gtkbuilder/business-options-gnome.glade
 gnucash/gtkbuilder/business-prefs.glade
 gnucash/gtkbuilder/dialog-account.glade
 gnucash/gtkbuilder/dialog-account-picker.glade
-gnucash/gtkbuilder/dialog-balance-assertion.glade
 gnucash/gtkbuilder/dialog-bi-import-gui.glade
 gnucash/gtkbuilder/dialog-billterms.glade
 gnucash/gtkbuilder/dialog-book-close.glade
@@ -277,6 +276,7 @@ gnucash/gtkbuilder/dialog-price.glade
 gnucash/gtkbuilder/dialog-print-check.glade
 gnucash/gtkbuilder/dialog-progress.glade
 gnucash/gtkbuilder/dialog-query-view.glade
+gnucash/gtkbuilder/dialog-reconciled-balance.glade
 gnucash/gtkbuilder/dialog-report.glade
 gnucash/gtkbuilder/dialog-reset-warnings.glade
 gnucash/gtkbuilder/dialog-search.glade
@@ -557,7 +557,6 @@ libgnucash/backend/dbi/gnc-dbisqlresult.cpp
 libgnucash/backend/sql/escape.cpp
 libgnucash/backend/sql/gnc-account-sql.cpp
 libgnucash/backend/sql/gnc-address-sql.cpp
-libgnucash/backend/sql/gnc-balance-assertion-sql.cpp
 libgnucash/backend/sql/gnc-bill-term-sql.cpp
 libgnucash/backend/sql/gnc-book-sql.cpp
 libgnucash/backend/sql/gnc-budget-sql.cpp
@@ -571,6 +570,7 @@ libgnucash/backend/sql/gnc-lots-sql.cpp
 libgnucash/backend/sql/gnc-order-sql.cpp
 libgnucash/backend/sql/gnc-owner-sql.cpp
 libgnucash/backend/sql/gnc-price-sql.cpp
+libgnucash/backend/sql/gnc-reconciled-balance-sql.cpp
 libgnucash/backend/sql/gnc-recurrence-sql.cpp
 libgnucash/backend/sql/gnc-schedxaction-sql.cpp
 libgnucash/backend/sql/gnc-slots-sql.cpp
@@ -584,7 +584,6 @@ libgnucash/backend/sql/gnc-vendor-sql.cpp
 libgnucash/backend/xml/gnc-account-xml-v2.cpp
 libgnucash/backend/xml/gnc-address-xml-v2.cpp
 libgnucash/backend/xml/gnc-backend-xml.cpp
-libgnucash/backend/xml/gnc-balance-assertion-xml-v2.cpp
 libgnucash/backend/xml/gnc-bill-term-xml-v2.cpp
 libgnucash/backend/xml/gnc-book-xml-v2.cpp
 libgnucash/backend/xml/gnc-budget-xml-v2.cpp
@@ -599,6 +598,7 @@ libgnucash/backend/xml/gnc-lot-xml-v2.cpp
 libgnucash/backend/xml/gnc-order-xml-v2.cpp
 libgnucash/backend/xml/gnc-owner-xml-v2.cpp
 libgnucash/backend/xml/gnc-pricedb-xml-v2.cpp
+libgnucash/backend/xml/gnc-reconciled-balance-xml-v2.cpp
 libgnucash/backend/xml/gnc-recurrence-xml-v2.cpp
 libgnucash/backend/xml/gnc-schedxaction-xml-v2.cpp
 libgnucash/backend/xml/gnc-tax-table-xml-v2.cpp
@@ -635,7 +635,6 @@ libgnucash/engine/engine-helpers.c
 libgnucash/engine/gnc-accounting-period.c
 libgnucash/engine/gncAddress.c
 libgnucash/engine/gnc-aqbanking-templates.cpp
-libgnucash/engine/gnc-balance-assertion.cpp
 libgnucash/engine/gncBillTerm.c
 libgnucash/engine/gnc-budget.cpp
 libgnucash/engine/gncBusiness.c
@@ -665,6 +664,7 @@ libgnucash/engine/gncOrder.c
 libgnucash/engine/gncOwner.c
 libgnucash/engine/gnc-pricedb.cpp
 libgnucash/engine/gnc-rational.cpp
+libgnucash/engine/gnc-reconciled-balance.cpp
 libgnucash/engine/gnc-session.c
 libgnucash/engine/gncTaxTable.c
 libgnucash/engine/gnc-timezone.cpp

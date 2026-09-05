@@ -1,5 +1,5 @@
 /********************************************************************\
- * gnc-balance-assertion.cpp -- Balance assertion implementation.    *
+ * gnc-reconciled-balance.cpp -- Reconciled balance implementation.    *
  *                                                                  *
  * This program is free software; you can redistribute it and/or    *
  * modify it under the terms of the GNU General Public License as   *
@@ -27,7 +27,7 @@
 #include "Account.h"
 #include "Split.h"
 #include "Transaction.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 #include "gnc-engine.h"
 #include "gnc-features.h"
 
@@ -39,16 +39,15 @@ enum
     PROP_ACCOUNT,               /* Table */
     PROP_DATE,                  /* Table */
     PROP_AMOUNT,                /* Table */
-    PROP_BASIS,                 /* Table */
     PROP_NOTES,                 /* Table */
 };
 
-struct balance_assertion_s
+struct reconciled_balance_s
 {
     QofInstance inst;
 };
 
-typedef struct GncBalanceAssertionPrivate
+typedef struct GncReconciledBalancePrivate
 {
     /* The account is held by guid rather than by pointer: an assertion
      * outlives the deletion of its account, and a stale pointer would
@@ -57,7 +56,6 @@ typedef struct GncBalanceAssertionPrivate
 
     time64 date;
     gnc_numeric amount;
-    GncBalanceAssertionBasis basis;
     const char *notes;
 
     /* Memoised evaluation. Walking an account's splits on every
@@ -66,18 +64,18 @@ typedef struct GncBalanceAssertionPrivate
      * affect a balance changes. See bump_generation(). */
     guint64 cache_generation;
     gnc_numeric cached_actual;
-} GncBalanceAssertionPrivate;
+} GncReconciledBalancePrivate;
 
 #define GET_PRIVATE(o) \
-    ((GncBalanceAssertionPrivate*) \
-     gnc_balance_assertion_get_instance_private((GncBalanceAssertion*)o))
+    ((GncReconciledBalancePrivate*) \
+     gnc_reconciled_balance_get_instance_private((GncReconciledBalance*)o))
 
-struct _GncBalanceAssertionClass
+struct _GncReconciledBalanceClass
 {
     QofInstanceClass parent_class;
 };
 
-G_DEFINE_TYPE_WITH_PRIVATE(GncBalanceAssertion, gnc_balance_assertion,
+G_DEFINE_TYPE_WITH_PRIVATE(GncReconciledBalance, gnc_reconciled_balance,
                            QOF_TYPE_INSTANCE)
 
 /* ================================================================ */
@@ -95,10 +93,10 @@ bump_generation (void)
 }
 
 static void
-gnc_balance_assertion_destroy_for_account (const Account *acc);
+gnc_reconciled_balance_destroy_for_account (const Account *acc);
 
 static void
-balance_assertion_event_handler (QofInstance *entity, QofEventId event_type,
+reconciled_balance_event_handler (QofInstance *entity, QofEventId event_type,
                                  gpointer user_data, gpointer event_data)
 {
     if (!entity)
@@ -113,7 +111,7 @@ balance_assertion_event_handler (QofInstance *entity, QofEventId event_type,
         if (event_type & QOF_EVENT_DESTROY)
         {
             bump_generation ();
-            gnc_balance_assertion_destroy_for_account (GNC_ACCOUNT (entity));
+            gnc_reconciled_balance_destroy_for_account (GNC_ACCOUNT (entity));
         }
         else if (event_type & QOF_EVENT_MODIFY)
             bump_generation ();
@@ -123,47 +121,46 @@ balance_assertion_event_handler (QofInstance *entity, QofEventId event_type,
 /* ================================================================ */
 
 static void
-gnc_balance_assertion_init (GncBalanceAssertion *ba)
+gnc_reconciled_balance_init (GncReconciledBalance *ba)
 {
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
 
     priv->acct_guid = *guid_null ();
     priv->date = gnc_time64_get_day_neutral (gnc_time (nullptr));
     priv->amount = gnc_numeric_zero ();
-    priv->basis = GNC_BALANCE_ASSERTION_BASIS_TOTAL;
     priv->notes = CACHE_INSERT ("");
     priv->cache_generation = 0;
     priv->cached_actual = gnc_numeric_zero ();
 }
 
 static void
-gnc_balance_assertion_dispose (GObject *bap)
+gnc_reconciled_balance_dispose (GObject *bap)
 {
-    G_OBJECT_CLASS(gnc_balance_assertion_parent_class)->dispose (bap);
+    G_OBJECT_CLASS(gnc_reconciled_balance_parent_class)->dispose (bap);
 }
 
 static void
-gnc_balance_assertion_finalize (GObject *bap)
+gnc_reconciled_balance_finalize (GObject *bap)
 {
-    G_OBJECT_CLASS(gnc_balance_assertion_parent_class)->finalize (bap);
+    G_OBJECT_CLASS(gnc_reconciled_balance_parent_class)->finalize (bap);
 }
 
 static void
-gnc_balance_assertion_get_property (GObject *object, guint prop_id,
+gnc_reconciled_balance_get_property (GObject *object, guint prop_id,
                                     GValue *value, GParamSpec *pspec)
 {
-    GncBalanceAssertion *ba;
-    GncBalanceAssertionPrivate *priv;
+    GncReconciledBalance *ba;
+    GncReconciledBalancePrivate *priv;
     Time64 time;
 
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (object));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (object));
 
-    ba = GNC_BALANCE_ASSERTION (object);
+    ba = GNC_RECONCILED_BALANCE (object);
     priv = GET_PRIVATE (ba);
     switch (prop_id)
     {
     case PROP_ACCOUNT:
-        g_value_take_object (value, gnc_balance_assertion_get_account (ba));
+        g_value_take_object (value, gnc_reconciled_balance_get_account (ba));
         break;
     case PROP_DATE:
         time.t = priv->date;
@@ -171,9 +168,6 @@ gnc_balance_assertion_get_property (GObject *object, guint prop_id,
         break;
     case PROP_AMOUNT:
         g_value_set_boxed (value, &priv->amount);
-        break;
-    case PROP_BASIS:
-        g_value_set_int (value, priv->basis);
         break;
     case PROP_NOTES:
         g_value_set_string (value, priv->notes);
@@ -185,37 +179,33 @@ gnc_balance_assertion_get_property (GObject *object, guint prop_id,
 }
 
 static void
-gnc_balance_assertion_set_property (GObject *object, guint prop_id,
+gnc_reconciled_balance_set_property (GObject *object, guint prop_id,
                                     const GValue *value, GParamSpec *pspec)
 {
-    GncBalanceAssertion *ba;
+    GncReconciledBalance *ba;
     Time64 *t;
 
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (object));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (object));
 
-    ba = GNC_BALANCE_ASSERTION (object);
+    ba = GNC_RECONCILED_BALANCE (object);
     g_assert (qof_instance_get_editlevel (ba));
 
     switch (prop_id)
     {
     case PROP_ACCOUNT:
-        gnc_balance_assertion_set_account
+        gnc_reconciled_balance_set_account
             (ba, GNC_ACCOUNT (g_value_get_object (value)));
         break;
     case PROP_DATE:
         t = (Time64*) g_value_get_boxed (value);
-        gnc_balance_assertion_set_date (ba, t->t);
+        gnc_reconciled_balance_set_date (ba, t->t);
         break;
     case PROP_AMOUNT:
-        gnc_balance_assertion_set_amount
+        gnc_reconciled_balance_set_amount
             (ba, *(gnc_numeric*) g_value_get_boxed (value));
         break;
-    case PROP_BASIS:
-        gnc_balance_assertion_set_basis
-            (ba, static_cast<GncBalanceAssertionBasis>(g_value_get_int (value)));
-        break;
     case PROP_NOTES:
-        gnc_balance_assertion_set_notes (ba, g_value_get_string (value));
+        gnc_reconciled_balance_set_notes (ba, g_value_get_string (value));
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -224,14 +214,14 @@ gnc_balance_assertion_set_property (GObject *object, guint prop_id,
 }
 
 static void
-gnc_balance_assertion_class_init (GncBalanceAssertionClass *klass)
+gnc_reconciled_balance_class_init (GncReconciledBalanceClass *klass)
 {
     GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
-    gobject_class->dispose = gnc_balance_assertion_dispose;
-    gobject_class->finalize = gnc_balance_assertion_finalize;
-    gobject_class->get_property = gnc_balance_assertion_get_property;
-    gobject_class->set_property = gnc_balance_assertion_set_property;
+    gobject_class->dispose = gnc_reconciled_balance_dispose;
+    gobject_class->finalize = gnc_reconciled_balance_finalize;
+    gobject_class->get_property = gnc_reconciled_balance_get_property;
+    gobject_class->set_property = gnc_reconciled_balance_set_property;
 
     g_object_class_install_property
         (gobject_class,
@@ -263,18 +253,6 @@ gnc_balance_assertion_class_init (GncBalanceAssertionClass *klass)
 
     g_object_class_install_property
         (gobject_class,
-         PROP_BASIS,
-         g_param_spec_int ("basis",
-                           "Assertion Basis",
-                           "Which balance the amount is asserted to be: the "
-                           "total balance, or the reconciled one.",
-                           GNC_BALANCE_ASSERTION_BASIS_TOTAL,
-                           GNC_BALANCE_ASSERTION_BASIS_RECONCILED,
-                           GNC_BALANCE_ASSERTION_BASIS_TOTAL,
-                           G_PARAM_READWRITE));
-
-    g_object_class_install_property
-        (gobject_class,
          PROP_NOTES,
          g_param_spec_string ("notes",
                               "Notes",
@@ -294,16 +272,16 @@ commit_err (QofInstance *inst, QofBackendError errcode)
 }
 
 static void
-gnc_balance_assertion_free (QofInstance *inst)
+gnc_reconciled_balance_free (QofInstance *inst)
 {
-    GncBalanceAssertion *ba;
-    GncBalanceAssertionPrivate *priv;
+    GncReconciledBalance *ba;
+    GncReconciledBalancePrivate *priv;
 
     if (inst == nullptr)
         return;
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (inst));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (inst));
 
-    ba = GNC_BALANCE_ASSERTION (inst);
+    ba = GNC_RECONCILED_BALANCE (inst);
     priv = GET_PRIVATE (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_DESTROY, nullptr);
@@ -316,34 +294,34 @@ gnc_balance_assertion_free (QofInstance *inst)
 static void noop (QofInstance *inst) {}
 
 void
-gnc_balance_assertion_begin_edit (GncBalanceAssertion *ba)
+gnc_reconciled_balance_begin_edit (GncReconciledBalance *ba)
 {
     qof_begin_edit (QOF_INSTANCE (ba));
 }
 
 void
-gnc_balance_assertion_commit_edit (GncBalanceAssertion *ba)
+gnc_reconciled_balance_commit_edit (GncReconciledBalance *ba)
 {
     if (!qof_commit_edit (QOF_INSTANCE (ba))) return;
     qof_commit_edit_part2 (QOF_INSTANCE (ba), commit_err, noop,
-                           gnc_balance_assertion_free);
+                           gnc_reconciled_balance_free);
 }
 
-GncBalanceAssertion *
-gnc_balance_assertion_new (QofBook *book)
+GncReconciledBalance *
+gnc_reconciled_balance_new (QofBook *book)
 {
     g_return_val_if_fail (book, nullptr);
 
     ENTER (" ");
 
-    auto ba { static_cast<GncBalanceAssertion*>
-              (g_object_new (GNC_TYPE_BALANCE_ASSERTION, nullptr)) };
-    qof_instance_init_data (&ba->inst, GNC_ID_BALANCE_ASSERTION, book);
+    auto ba { static_cast<GncReconciledBalance*>
+              (g_object_new (GNC_TYPE_RECONCILED_BALANCE, nullptr)) };
+    qof_instance_init_data (&ba->inst, GNC_ID_RECONCILED_BALANCE, book);
 
     /* Older GnuCash reads a book containing assertions happily, but
      * silently drops them on the next save. Flag the book so that it
      * says so instead. */
-    gnc_features_set_used (book, GNC_FEATURE_BALANCE_ASSERTIONS);
+    gnc_features_set_used (book, GNC_FEATURE_RECONCILED_BALANCES);
 
     qof_event_gen (&ba->inst, QOF_EVENT_CREATE, nullptr);
 
@@ -352,19 +330,19 @@ gnc_balance_assertion_new (QofBook *book)
 }
 
 void
-gnc_balance_assertion_destroy (GncBalanceAssertion *ba)
+gnc_reconciled_balance_destroy (GncReconciledBalance *ba)
 {
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
-    gnc_balance_assertion_begin_edit (ba);
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (ba));
+    gnc_reconciled_balance_begin_edit (ba);
     qof_instance_set_dirty (&ba->inst);
     qof_instance_set_destroying (ba, TRUE);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_commit_edit (ba);
 }
 
 const GncGUID *
-gnc_balance_assertion_get_guid (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_guid (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), guid_null ());
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), guid_null ());
     return qof_instance_get_guid (QOF_INSTANCE (ba));
 }
 
@@ -372,11 +350,11 @@ gnc_balance_assertion_get_guid (const GncBalanceAssertion *ba)
 /* Accessors */
 
 Account *
-gnc_balance_assertion_get_account (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_account (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), nullptr);
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), nullptr);
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
     if (guid_equal (&priv->acct_guid, guid_null ()))
         return nullptr;
 
@@ -385,126 +363,99 @@ gnc_balance_assertion_get_account (const GncBalanceAssertion *ba)
 }
 
 void
-gnc_balance_assertion_set_account (GncBalanceAssertion *ba, Account *acc)
+gnc_reconciled_balance_set_account (GncReconciledBalance *ba, Account *acc)
 {
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (ba));
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
     const GncGUID *guid = acc ? xaccAccountGetGUID (acc) : guid_null ();
 
     if (guid_equal (&priv->acct_guid, guid))
         return;
 
-    gnc_balance_assertion_begin_edit (ba);
+    gnc_reconciled_balance_begin_edit (ba);
     priv->acct_guid = *guid;
     priv->cache_generation = 0;
     qof_instance_set_dirty (&ba->inst);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
 }
 
 time64
-gnc_balance_assertion_get_date (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_date (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), 0);
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), 0);
     return GET_PRIVATE (ba)->date;
 }
 
 void
-gnc_balance_assertion_set_date (GncBalanceAssertion *ba, time64 date)
+gnc_reconciled_balance_set_date (GncReconciledBalance *ba, time64 date)
 {
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (ba));
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
     time64 neutral = gnc_time64_get_day_neutral (date);
 
     if (priv->date == neutral)
         return;
 
-    gnc_balance_assertion_begin_edit (ba);
+    gnc_reconciled_balance_begin_edit (ba);
     priv->date = neutral;
     priv->cache_generation = 0;
     qof_instance_set_dirty (&ba->inst);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
 }
 
 gnc_numeric
-gnc_balance_assertion_get_amount (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_amount (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), gnc_numeric_zero ());
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), gnc_numeric_zero ());
     return GET_PRIVATE (ba)->amount;
 }
 
 void
-gnc_balance_assertion_set_amount (GncBalanceAssertion *ba, gnc_numeric amount)
+gnc_reconciled_balance_set_amount (GncReconciledBalance *ba, gnc_numeric amount)
 {
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (ba));
     g_return_if_fail (!gnc_numeric_check (amount));
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
     if (gnc_numeric_equal (priv->amount, amount))
         return;
 
-    gnc_balance_assertion_begin_edit (ba);
+    gnc_reconciled_balance_begin_edit (ba);
     priv->amount = amount;
     qof_instance_set_dirty (&ba->inst);
-    gnc_balance_assertion_commit_edit (ba);
-
-    qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
-}
-
-GncBalanceAssertionBasis
-gnc_balance_assertion_get_basis (const GncBalanceAssertion *ba)
-{
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba),
-                          GNC_BALANCE_ASSERTION_BASIS_TOTAL);
-    return GET_PRIVATE (ba)->basis;
-}
-
-void
-gnc_balance_assertion_set_basis (GncBalanceAssertion *ba,
-                                 GncBalanceAssertionBasis basis)
-{
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
-
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
-    if (priv->basis == basis)
-        return;
-
-    gnc_balance_assertion_begin_edit (ba);
-    priv->basis = basis;
-    priv->cache_generation = 0;
-    qof_instance_set_dirty (&ba->inst);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
 }
 
 const char *
-gnc_balance_assertion_get_notes (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_notes (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), nullptr);
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), nullptr);
     return GET_PRIVATE (ba)->notes;
 }
 
 void
-gnc_balance_assertion_set_notes (GncBalanceAssertion *ba, const char *notes)
+gnc_reconciled_balance_set_notes (GncReconciledBalance *ba, const char *notes)
 {
-    g_return_if_fail (GNC_IS_BALANCE_ASSERTION (ba));
+    g_return_if_fail (GNC_IS_RECONCILED_BALANCE (ba));
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
     if (!notes)
         notes = "";
     if (!g_strcmp0 (priv->notes, notes))
         return;
 
-    gnc_balance_assertion_begin_edit (ba);
+    gnc_reconciled_balance_begin_edit (ba);
     CACHE_REPLACE (priv->notes, notes);
     qof_instance_set_dirty (&ba->inst);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_commit_edit (ba);
 
     qof_event_gen (&ba->inst, QOF_EVENT_MODIFY, nullptr);
 }
@@ -512,18 +463,12 @@ gnc_balance_assertion_set_notes (GncBalanceAssertion *ba, const char *notes)
 /* ================================================================ */
 /* Evaluation */
 
-/* The balance a reconciliation establishes: the splits it marked, plus
- * everything marked by earlier ones. Each split is placed by its own
- * reconcile date -- the statement date it cleared on -- rather than by
- * when it was posted, so an item written before the statement but
- * cleared after it stays out of the sum.
- *
- * There is deliberately no engine-wide function for this: the reconcile
- * window is the only thing that maintains split reconcile dates with
- * enough care to make it meaningful. */
-static gnc_numeric
-reconciled_balance_as_of_reconcile_date (Account *acc, time64 date)
+gnc_numeric
+gnc_reconciled_balance_compute (Account *acc, time64 date)
 {
+    g_return_val_if_fail (GNC_IS_ACCOUNT (acc), gnc_numeric_zero ());
+
+    time64 end = gnc_time64_get_day_end (date);
     gnc_numeric total = gnc_numeric_zero ();
 
     for (GList *n = xaccAccountGetSplitList (acc); n; n = n->next)
@@ -534,7 +479,7 @@ reconciled_balance_as_of_reconcile_date (Account *acc, time64 date)
         if (state != YREC && state != FREC)
             continue;
 
-        if (xaccSplitGetDateReconciled (split) > date)
+        if (xaccSplitGetDateReconciled (split) > end)
             continue;
 
         if (xaccTransGetVoidStatus (xaccSplitGetParent (split)))
@@ -547,24 +492,19 @@ reconciled_balance_as_of_reconcile_date (Account *acc, time64 date)
 }
 
 gnc_numeric
-gnc_balance_assertion_get_actual (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_actual (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), gnc_numeric_zero ());
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), gnc_numeric_zero ());
 
-    GncBalanceAssertionPrivate *priv = GET_PRIVATE (ba);
-    Account *acc = gnc_balance_assertion_get_account (ba);
+    GncReconciledBalancePrivate *priv = GET_PRIVATE (ba);
+    Account *acc = gnc_reconciled_balance_get_account (ba);
 
     if (!acc)
         return gnc_numeric_zero ();
 
     if (priv->cache_generation != balance_generation)
     {
-        time64 end = gnc_time64_get_day_end (priv->date);
-
-        priv->cached_actual =
-            priv->basis == GNC_BALANCE_ASSERTION_BASIS_RECONCILED
-            ? reconciled_balance_as_of_reconcile_date (acc, end)
-            : xaccAccountGetBalanceAsOfDate (acc, end);
+        priv->cached_actual = gnc_reconciled_balance_compute (acc, priv->date);
         priv->cache_generation = balance_generation;
     }
 
@@ -572,11 +512,11 @@ gnc_balance_assertion_get_actual (const GncBalanceAssertion *ba)
 }
 
 gnc_numeric
-gnc_balance_assertion_get_delta (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_get_delta (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba), gnc_numeric_zero ());
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba), gnc_numeric_zero ());
 
-    Account *acc = gnc_balance_assertion_get_account (ba);
+    Account *acc = gnc_reconciled_balance_get_account (ba);
     if (!acc)
         return gnc_numeric_zero ();
 
@@ -587,53 +527,53 @@ gnc_balance_assertion_get_delta (const GncBalanceAssertion *ba)
      * the values as they stand. */
     int denom = xaccAccountGetCommoditySCU (acc);
     if (denom <= 0)
-        return gnc_numeric_sub (gnc_balance_assertion_get_actual (ba),
-                                gnc_balance_assertion_get_amount (ba),
+        return gnc_numeric_sub (gnc_reconciled_balance_get_actual (ba),
+                                gnc_reconciled_balance_get_amount (ba),
                                 GNC_DENOM_AUTO, GNC_HOW_DENOM_LCD);
 
-    return gnc_numeric_sub (gnc_balance_assertion_get_actual (ba),
-                            gnc_balance_assertion_get_amount (ba),
+    return gnc_numeric_sub (gnc_reconciled_balance_get_actual (ba),
+                            gnc_reconciled_balance_get_amount (ba),
                             denom, GNC_HOW_RND_ROUND_HALF_UP);
 }
 
-GncBalanceAssertionStatus
-gnc_balance_assertion_get_status (const GncBalanceAssertion *ba)
+GncReconciledBalanceStatus
+gnc_reconciled_balance_get_status (const GncReconciledBalance *ba)
 {
-    g_return_val_if_fail (GNC_IS_BALANCE_ASSERTION (ba),
-                          GNC_BALANCE_ASSERTION_UNKNOWN);
+    g_return_val_if_fail (GNC_IS_RECONCILED_BALANCE (ba),
+                          GNC_RECONCILED_BALANCE_UNKNOWN);
 
-    if (!gnc_balance_assertion_get_account (ba))
-        return GNC_BALANCE_ASSERTION_UNKNOWN;
+    if (!gnc_reconciled_balance_get_account (ba))
+        return GNC_RECONCILED_BALANCE_UNKNOWN;
 
-    return gnc_numeric_zero_p (gnc_balance_assertion_get_delta (ba))
-        ? GNC_BALANCE_ASSERTION_PASS
-        : GNC_BALANCE_ASSERTION_FAIL;
+    return gnc_numeric_zero_p (gnc_reconciled_balance_get_delta (ba))
+        ? GNC_RECONCILED_BALANCE_HOLDS
+        : GNC_RECONCILED_BALANCE_BROKEN;
 }
 
 gboolean
-gnc_balance_assertion_is_failing (const GncBalanceAssertion *ba)
+gnc_reconciled_balance_is_broken (const GncReconciledBalance *ba)
 {
-    return gnc_balance_assertion_get_status (ba) == GNC_BALANCE_ASSERTION_FAIL;
+    return gnc_reconciled_balance_get_status (ba) == GNC_RECONCILED_BALANCE_BROKEN;
 }
 
 /* ================================================================ */
 /* Collections */
 
-GncBalanceAssertion *
-gnc_balance_assertion_lookup (const GncGUID *guid, const QofBook *book)
+GncReconciledBalance *
+gnc_reconciled_balance_lookup (const GncGUID *guid, const QofBook *book)
 {
     g_return_val_if_fail (guid, nullptr);
     g_return_val_if_fail (book, nullptr);
 
-    QofCollection *col = qof_book_get_collection (book, GNC_ID_BALANCE_ASSERTION);
-    return GNC_BALANCE_ASSERTION (qof_collection_lookup_entity (col, guid));
+    QofCollection *col = qof_book_get_collection (book, GNC_ID_RECONCILED_BALANCE);
+    return GNC_RECONCILED_BALANCE (qof_collection_lookup_entity (col, guid));
 }
 
 static gint
 compare_by_date (gconstpointer a, gconstpointer b)
 {
-    time64 da = gnc_balance_assertion_get_date (GNC_BALANCE_ASSERTION (a));
-    time64 db = gnc_balance_assertion_get_date (GNC_BALANCE_ASSERTION (b));
+    time64 da = gnc_reconciled_balance_get_date (GNC_RECONCILED_BALANCE (a));
+    time64 db = gnc_reconciled_balance_get_date (GNC_RECONCILED_BALANCE (b));
 
     if (da < db) return -1;
     if (da > db) return 1;
@@ -644,14 +584,14 @@ typedef struct
 {
     GList *list;
     const GncGUID *acct_guid;   /* NULL: any account */
-    gboolean failing_only;
+    gboolean broken_only;
 } CollectData;
 
 static void
 collect_assertion_cb (QofInstance *inst, gpointer user_data)
 {
     CollectData *data = (CollectData*) user_data;
-    GncBalanceAssertion *ba = GNC_BALANCE_ASSERTION (inst);
+    GncReconciledBalance *ba = GNC_RECONCILED_BALANCE (inst);
 
     /* Match on the stored guid rather than on the resolved account:
      * this also has to work while the account is being torn down, when
@@ -660,7 +600,7 @@ collect_assertion_cb (QofInstance *inst, gpointer user_data)
         !guid_equal (&GET_PRIVATE (ba)->acct_guid, data->acct_guid))
         return;
 
-    if (data->failing_only && !gnc_balance_assertion_is_failing (ba))
+    if (data->broken_only && !gnc_reconciled_balance_is_broken (ba))
         return;
 
     data->list = g_list_prepend (data->list, ba);
@@ -668,27 +608,27 @@ collect_assertion_cb (QofInstance *inst, gpointer user_data)
 
 static GList *
 collect_assertions (const QofBook *book, const Account *acc,
-                    gboolean failing_only)
+                    gboolean broken_only)
 {
     if (!book)
         return nullptr;
 
     CollectData data { nullptr, acc ? xaccAccountGetGUID (acc) : nullptr,
-                       failing_only };
-    qof_collection_foreach (qof_book_get_collection (book, GNC_ID_BALANCE_ASSERTION),
+                       broken_only };
+    qof_collection_foreach (qof_book_get_collection (book, GNC_ID_RECONCILED_BALANCE),
                             collect_assertion_cb, &data);
 
     return g_list_sort (data.list, compare_by_date);
 }
 
 GList *
-gnc_balance_assertion_get_all (const QofBook *book)
+gnc_reconciled_balance_get_all (const QofBook *book)
 {
     return collect_assertions (book, nullptr, FALSE);
 }
 
 GList *
-gnc_balance_assertion_get_for_account (const Account *acc)
+gnc_reconciled_balance_get_for_account (const Account *acc)
 {
     g_return_val_if_fail (GNC_IS_ACCOUNT (acc), nullptr);
     return collect_assertions (qof_instance_get_book (QOF_INSTANCE (acc)),
@@ -696,22 +636,22 @@ gnc_balance_assertion_get_for_account (const Account *acc)
 }
 
 GList *
-gnc_balance_assertion_get_failing (const QofBook *book)
+gnc_reconciled_balance_get_broken (const QofBook *book)
 {
     return collect_assertions (book, nullptr, TRUE);
 }
 
 guint
-gnc_balance_assertion_count_failing (const QofBook *book)
+gnc_reconciled_balance_count_broken (const QofBook *book)
 {
-    GList *failing = gnc_balance_assertion_get_failing (book);
-    guint count = g_list_length (failing);
-    g_list_free (failing);
+    GList *broken = gnc_reconciled_balance_get_broken (book);
+    guint count = g_list_length (broken);
+    g_list_free (broken);
     return count;
 }
 
 guint
-gnc_balance_assertion_count_failing_for_account (const Account *acc)
+gnc_reconciled_balance_count_broken_for_account (const Account *acc)
 {
     g_return_val_if_fail (GNC_IS_ACCOUNT (acc), 0);
 
@@ -728,7 +668,7 @@ gnc_balance_assertion_count_failing_for_account (const Account *acc)
  * unresolvable warning. Collect first, destroy afterwards -- the
  * destroy modifies the collection we would otherwise be iterating. */
 static void
-gnc_balance_assertion_destroy_for_account (const Account *acc)
+gnc_reconciled_balance_destroy_for_account (const Account *acc)
 {
     QofBook *book = qof_instance_get_book (QOF_INSTANCE (acc));
     if (!book || qof_book_shutting_down (book))
@@ -736,7 +676,7 @@ gnc_balance_assertion_destroy_for_account (const Account *acc)
 
     GList *list = collect_assertions (book, acc, FALSE);
     for (GList *n = list; n; n = n->next)
-        gnc_balance_assertion_destroy (GNC_BALANCE_ASSERTION (n->data));
+        gnc_reconciled_balance_destroy (GNC_RECONCILED_BALANCE (n->data));
     g_list_free (list);
 }
 
@@ -746,26 +686,26 @@ gnc_balance_assertion_destroy_for_account (const Account *acc)
 static void
 destroy_assertion_on_book_close (QofInstance *ent, gpointer data)
 {
-    gnc_balance_assertion_destroy (GNC_BALANCE_ASSERTION (ent));
+    gnc_reconciled_balance_destroy (GNC_RECONCILED_BALANCE (ent));
 }
 
 static void
-gnc_balance_assertion_book_end (QofBook *book)
+gnc_reconciled_balance_book_end (QofBook *book)
 {
-    QofCollection *col = qof_book_get_collection (book, GNC_ID_BALANCE_ASSERTION);
+    QofCollection *col = qof_book_get_collection (book, GNC_ID_RECONCILED_BALANCE);
     qof_collection_foreach (col, destroy_assertion_on_book_close, nullptr);
 }
 
 static const char *
-gnc_balance_assertion_printable (gpointer obj)
+gnc_reconciled_balance_printable (gpointer obj)
 {
     static char buf[128];
-    GncBalanceAssertion *ba = GNC_BALANCE_ASSERTION (obj);
-    Account *acc = gnc_balance_assertion_get_account (ba);
+    GncReconciledBalance *ba = GNC_RECONCILED_BALANCE (obj);
+    Account *acc = gnc_reconciled_balance_get_account (ba);
     char datebuf[MAX_DATE_LENGTH + 1];
 
     qof_print_date_buff (datebuf, MAX_DATE_LENGTH,
-                         gnc_balance_assertion_get_date (ba));
+                         gnc_reconciled_balance_get_date (ba));
     g_snprintf (buf, sizeof (buf), "%s @ %s",
                 acc ? xaccAccountGetName (acc) : "(no account)", datebuf);
     return buf;
@@ -777,50 +717,45 @@ gnc_balance_assertion_printable (gpointer obj)
 # define DI(x) x
 #endif
 
-static QofObject balance_assertion_object_def =
+static QofObject reconciled_balance_object_def =
 {
     DI(.interface_version = ) QOF_OBJECT_VERSION,
-    DI(.e_type            = ) GNC_ID_BALANCE_ASSERTION,
-    DI(.type_label        = ) "Balance Assertion",
-    DI(.create            = ) (void*(*)(QofBook*)) gnc_balance_assertion_new,
+    DI(.e_type            = ) GNC_ID_RECONCILED_BALANCE,
+    DI(.type_label        = ) "Reconciled Balance",
+    DI(.create            = ) (void*(*)(QofBook*)) gnc_reconciled_balance_new,
     DI(.book_begin        = ) nullptr,
-    DI(.book_end          = ) gnc_balance_assertion_book_end,
+    DI(.book_end          = ) gnc_reconciled_balance_book_end,
     DI(.is_dirty          = ) qof_collection_is_dirty,
     DI(.mark_clean        = ) qof_collection_mark_clean,
     DI(.foreach           = ) qof_collection_foreach,
-    DI(.printable         = ) gnc_balance_assertion_printable,
+    DI(.printable         = ) gnc_reconciled_balance_printable,
     DI(.version_cmp       = ) (int (*)(gpointer, gpointer)) qof_instance_version_cmp,
 };
 
 gboolean
-gnc_balance_assertion_register (void)
+gnc_reconciled_balance_register (void)
 {
     static QofParam params[] =
     {
         {
             "account", GNC_ID_ACCOUNT,
-            (QofAccessFunc) gnc_balance_assertion_get_account,
-            (QofSetterFunc) gnc_balance_assertion_set_account
+            (QofAccessFunc) gnc_reconciled_balance_get_account,
+            (QofSetterFunc) gnc_reconciled_balance_set_account
         },
         {
             "date", QOF_TYPE_DATE,
-            (QofAccessFunc) gnc_balance_assertion_get_date,
-            (QofSetterFunc) gnc_balance_assertion_set_date
+            (QofAccessFunc) gnc_reconciled_balance_get_date,
+            (QofSetterFunc) gnc_reconciled_balance_set_date
         },
         {
             "amount", QOF_TYPE_NUMERIC,
-            (QofAccessFunc) gnc_balance_assertion_get_amount,
-            (QofSetterFunc) gnc_balance_assertion_set_amount
-        },
-        {
-            "basis", QOF_TYPE_INT32,
-            (QofAccessFunc) gnc_balance_assertion_get_basis,
-            (QofSetterFunc) gnc_balance_assertion_set_basis
+            (QofAccessFunc) gnc_reconciled_balance_get_amount,
+            (QofSetterFunc) gnc_reconciled_balance_set_amount
         },
         {
             "notes", QOF_TYPE_STRING,
-            (QofAccessFunc) gnc_balance_assertion_get_notes,
-            (QofSetterFunc) gnc_balance_assertion_set_notes
+            (QofAccessFunc) gnc_reconciled_balance_get_notes,
+            (QofSetterFunc) gnc_reconciled_balance_set_notes
         },
         {
             QOF_PARAM_BOOK, QOF_ID_BOOK,
@@ -833,14 +768,14 @@ gnc_balance_assertion_register (void)
         { nullptr },
     };
 
-    qof_class_register (GNC_ID_BALANCE_ASSERTION, (QofSortFunc) nullptr, params);
+    qof_class_register (GNC_ID_RECONCILED_BALANCE, (QofSortFunc) nullptr, params);
 
     static gboolean handler_registered = FALSE;
     if (!handler_registered)
     {
-        qof_event_register_handler (balance_assertion_event_handler, nullptr);
+        qof_event_register_handler (reconciled_balance_event_handler, nullptr);
         handler_registered = TRUE;
     }
 
-    return qof_object_register (&balance_assertion_object_def);
+    return qof_object_register (&reconciled_balance_object_def);
 }

@@ -47,7 +47,7 @@
 #include "ScrubBusiness.h"
 #include "Transaction.h"
 #include "dialog-account.h"
-#include "dialog-balance-assertion.h"
+#include "dialog-reconciled-balance.h"
 #include "dialog-transfer.h"
 #include "dialog-utils.h"
 #include "assistant-hierarchy.h"
@@ -171,7 +171,7 @@ static void gnc_plugin_page_account_tree_cmd_stock_split (GSimpleAction *simple,
 static void gnc_plugin_page_account_tree_cmd_stock_assistant (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_account_tree_cmd_edit_tax_options (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_account_tree_cmd_lots (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
-static void gnc_plugin_page_account_tree_cmd_balance_assertions (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
+static void gnc_plugin_page_account_tree_cmd_reconciled_balances (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_account_tree_cmd_scrub (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_account_tree_cmd_scrub_sub (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_account_tree_cmd_scrub_all (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
@@ -211,7 +211,7 @@ static GActionEntry gnc_plugin_page_account_tree_actions [] =
     { "ActionsStockSplitAction", gnc_plugin_page_account_tree_cmd_stock_split, NULL, NULL, NULL },
     { "ActionsStockAssistantAction", gnc_plugin_page_account_tree_cmd_stock_assistant, NULL, NULL, NULL },
     { "ActionsLotsAction", gnc_plugin_page_account_tree_cmd_lots, NULL, NULL, NULL },
-    { "ActionsBalanceAssertionsAction", gnc_plugin_page_account_tree_cmd_balance_assertions, NULL, NULL, NULL },
+    { "ActionsReconciledBalancesAction", gnc_plugin_page_account_tree_cmd_reconciled_balances, NULL, NULL, NULL },
     { "ScrubAction", gnc_plugin_page_account_tree_cmd_scrub, NULL, NULL, NULL },
     { "ScrubSubAction", gnc_plugin_page_account_tree_cmd_scrub_sub, NULL, NULL, NULL },
     { "ScrubAllAction", gnc_plugin_page_account_tree_cmd_scrub_all, NULL, NULL, NULL },
@@ -265,7 +265,7 @@ static const gchar *actions_requiring_account_always[] =
     "EditOpenAccountAction",
     "EditOpenSubaccountsAction",
     "ActionsLotsAction",
-    "ActionsBalanceAssertionsAction",
+    "ActionsReconciledBalancesAction",
     NULL
 };
 
@@ -1918,7 +1918,7 @@ gnc_plugin_page_account_tree_cmd_lots (GSimpleAction *simple,
 }
 
 static void
-gnc_plugin_page_account_tree_cmd_balance_assertions (GSimpleAction *simple,
+gnc_plugin_page_account_tree_cmd_reconciled_balances (GSimpleAction *simple,
                                                      GVariant      *paramter,
                                                      gpointer       user_data)
 {
@@ -1929,7 +1929,7 @@ gnc_plugin_page_account_tree_cmd_balance_assertions (GSimpleAction *simple,
     if (!account)
         return;
 
-    gnc_balance_assertion_dialog (GTK_WINDOW(window), account);
+    gnc_reconciled_balance_dialog (GTK_WINDOW(window), account);
 }
 
 static gboolean

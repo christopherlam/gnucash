@@ -29,7 +29,7 @@
 #include "gnc-engine.h"
 #include "gnc-pricedb.h"
 #include "gnc-budget.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 
 #include "gnc-xml-helper.h"
 #include "sixtp.h"
@@ -60,8 +60,8 @@ sixtp* gnc_schedXaction_sixtp_parser_create (void);
 xmlNodePtr gnc_budget_dom_tree_create (GncBudget* bgt);
 sixtp* gnc_budget_sixtp_parser_create (void);
 
-xmlNodePtr gnc_balance_assertion_dom_tree_create (GncBalanceAssertion* ba);
-sixtp* gnc_balance_assertion_sixtp_parser_create (void);
+xmlNodePtr gnc_reconciled_balance_dom_tree_create (GncReconciledBalance* ba);
+sixtp* gnc_reconciled_balance_sixtp_parser_create (void);
 
 xmlNodePtr gnc_transaction_dom_tree_create (Transaction* txn);
 sixtp* gnc_transaction_sixtp_parser_create (void);

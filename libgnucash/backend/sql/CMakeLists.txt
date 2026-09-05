@@ -7,7 +7,7 @@ set (backend_sql_SOURCES
   gnc-address-sql.cpp
   gnc-bill-term-sql.cpp
   gnc-book-sql.cpp
-  gnc-balance-assertion-sql.cpp
+  gnc-reconciled-balance-sql.cpp
   gnc-budget-sql.cpp
   gnc-commodity-sql.cpp
   gnc-customer-sql.cpp
@@ -35,7 +35,7 @@ set (backend_sql_noinst_HEADERS
   gnc-account-sql.h
   gnc-bill-term-sql.h
   gnc-book-sql.h
-  gnc-balance-assertion-sql.h
+  gnc-reconciled-balance-sql.h
   gnc-budget-sql.h
   gnc-commodity-sql.h
   gnc-customer-sql.h

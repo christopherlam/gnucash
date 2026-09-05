@@ -36,7 +36,7 @@
 #include "gnc-pricedb-p.h"
 #include "gnc-lot-p.h"
 #include "gnc-budget.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 
 #include "gncAddressP.h"
 #include "gncBillTermP.h"
@@ -79,7 +79,7 @@ cashobjects_register(void)
     g_return_val_if_fail(gnc_pricedb_register(), FALSE);
     g_return_val_if_fail (gnc_budget_register(), FALSE);
     g_return_val_if_fail ( gnc_lot_register (), FALSE);
-    g_return_val_if_fail (gnc_balance_assertion_register(), FALSE);
+    g_return_val_if_fail (gnc_reconciled_balance_register(), FALSE);
 
     /* And the business objects */
     business_core_init();

@@ -263,9 +263,9 @@
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
     <item>
-      <attribute name="label" translatable="yes">_Balance Assertions…</attribute>
-      <attribute name="action">GncPluginPageRegisterActions.ActionsBalanceAssertionsAction</attribute>
-      <attribute name="tooltip" translatable="yes">Record and review what this account's balance should be on given dates</attribute>
+      <attribute name="label" translatable="yes">_Reconciled Balances…</attribute>
+      <attribute name="action">GncPluginPageRegisterActions.ActionsReconciledBalancesAction</attribute>
+      <attribute name="tooltip" translatable="yes">Review the balances this account's reconciliations agreed, and whether they still hold</attribute>
       <attribute name="temp" translatable="no">yes</attribute>
     </item>
   </menu>

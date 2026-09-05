@@ -50,7 +50,7 @@
 #include "gnc-plugin-business.h"
 
 #include "dialog-account.h"
-#include "dialog-balance-assertion.h"
+#include "dialog-reconciled-balance.h"
 #include "dialog-dup-trans.h"
 #include "dialog-find-account.h"
 #include "dialog-find-transactions.h"
@@ -167,7 +167,7 @@ static void gnc_plugin_page_register_cmd_autoclear (GSimpleAction *simple, GVari
 static void gnc_plugin_page_register_cmd_transfer (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_register_cmd_stock_split (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_register_cmd_lots (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
-static void gnc_plugin_page_register_cmd_balance_assertions (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
+static void gnc_plugin_page_register_cmd_reconciled_balances (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_register_cmd_enter_transaction (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_register_cmd_cancel_transaction (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
 static void gnc_plugin_page_register_cmd_delete_transaction (GSimpleAction *simple, GVariant *paramter, gpointer user_data);
@@ -277,7 +277,7 @@ static GActionEntry gnc_plugin_page_register_actions [] =
     { "ActionsStockAssistantAction", gnc_plugin_page_register_cmd_stock_assistant, NULL, NULL, NULL },
     { "ActionsStockSplitAction", gnc_plugin_page_register_cmd_stock_split, NULL, NULL, NULL },
     { "ActionsLotsAction", gnc_plugin_page_register_cmd_lots, NULL, NULL, NULL },
-    { "ActionsBalanceAssertionsAction", gnc_plugin_page_register_cmd_balance_assertions, NULL, NULL, NULL },
+    { "ActionsReconciledBalancesAction", gnc_plugin_page_register_cmd_reconciled_balances, NULL, NULL, NULL },
     { "BlankTransactionAction", gnc_plugin_page_register_cmd_blank_transaction, NULL, NULL, NULL },
     { "GotoDateAction", gnc_plugin_page_register_cmd_goto_date, NULL, NULL, NULL },
     { "EditExchangeRateAction", gnc_plugin_page_register_cmd_exchange_rate, NULL, NULL, NULL },
@@ -326,7 +326,7 @@ static const gchar* actions_requiring_account[] =
     "ActionsReconcileAction",
     "ActionsAutoClearAction",
     "ActionsLotsAction",
-    "ActionsBalanceAssertionsAction",
+    "ActionsReconciledBalancesAction",
     NULL
 };
 
@@ -2910,7 +2910,7 @@ gnc_plugin_page_register_cmd_lots (GSimpleAction *simple,
 }
 
 static void
-gnc_plugin_page_register_cmd_balance_assertions (GSimpleAction *simple,
+gnc_plugin_page_register_cmd_reconciled_balances (GSimpleAction *simple,
                                                  GVariant      *paramter,
                                                  gpointer       user_data)
 {
@@ -2937,10 +2937,10 @@ gnc_plugin_page_register_cmd_balance_assertions (GSimpleAction *simple,
      * just scrolled to the last transaction on their statement. */
     trans = gnc_plugin_page_register_get_current_txn (page);
     if (trans)
-        gnc_balance_assertion_dialog_for_date (window, account,
+        gnc_reconciled_balance_dialog_for_date (window, account,
                                                xaccTransGetDate (trans));
     else
-        gnc_balance_assertion_dialog (window, account);
+        gnc_reconciled_balance_dialog (window, account);
 
     LEAVE (" ");
 }

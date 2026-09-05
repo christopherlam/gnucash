@@ -1,5 +1,5 @@
 /********************************************************************
- * gnc-balance-assertion-sql.cpp: load and save data to SQL          *
+ * gnc-reconciled-balance-sql.cpp: load and save data to SQL          *
  *                                                                  *
  * This program is free software; you can redistribute it and/or    *
  * modify it under the terms of the GNU General Public License as   *
@@ -18,8 +18,8 @@
  * 51 Franklin Street, Fifth Floor    Fax:    +1-617-542-2652       *
  * Boston, MA  02110-1301,  USA       gnu@gnu.org                   *
 \********************************************************************/
-/** @file gnc-balance-assertion-sql.cpp
- *  @brief load and save balance assertions to SQL
+/** @file gnc-reconciled-balance-sql.cpp
+ *  @brief load and save reconciled balances to SQL
  */
 
 #include <guid.hpp>
@@ -29,7 +29,7 @@
 
 #include "qof.h"
 #include "Account.h"
-#include "gnc-balance-assertion.h"
+#include "gnc-reconciled-balance.h"
 
 #include "gnc-sql-connection.hpp"
 #include "gnc-sql-backend.hpp"
@@ -37,14 +37,14 @@
 #include "gnc-sql-column-table-entry.hpp"
 #include "gnc-slots-sql.h"
 
-#include "gnc-balance-assertion-sql.h"
+#include "gnc-reconciled-balance-sql.h"
 
 [[maybe_unused]] static QofLogModule log_module = G_LOG_DOMAIN;
 
-#define TABLE_NAME "balance_assertions"
+#define TABLE_NAME "reconciled_balances"
 #define TABLE_VERSION 1
 
-#define BA_MAX_NOTES_LEN 2048
+#define RB_MAX_NOTES_LEN 2048
 
 static const EntryVec col_table
 ({
@@ -53,31 +53,30 @@ static const EntryVec col_table
                                             "account"),
     gnc_sql_make_table_entry<CT_TIME>("date", 0, COL_NNUL, "date"),
     gnc_sql_make_table_entry<CT_NUMERIC>("amount", 0, COL_NNUL, "amount"),
-    gnc_sql_make_table_entry<CT_INT>("basis", 0, COL_NNUL, "basis"),
-    gnc_sql_make_table_entry<CT_STRING>("notes", BA_MAX_NOTES_LEN, 0, "notes"),
+    gnc_sql_make_table_entry<CT_STRING>("notes", RB_MAX_NOTES_LEN, 0, "notes"),
 });
 
-GncSqlBalanceAssertionBackend::GncSqlBalanceAssertionBackend() :
-    GncSqlObjectBackend(TABLE_VERSION, GNC_ID_BALANCE_ASSERTION,
+GncSqlReconciledBalanceBackend::GncSqlReconciledBalanceBackend() :
+    GncSqlObjectBackend(TABLE_VERSION, GNC_ID_RECONCILED_BALANCE,
                         TABLE_NAME, col_table) {}
 
 /* ================================================================= */
-static GncBalanceAssertion*
-load_single_balance_assertion (GncSqlBackend* sql_be, GncSqlRow& row)
+static GncReconciledBalance*
+load_single_reconciled_balance (GncSqlBackend* sql_be, GncSqlRow& row)
 {
     g_return_val_if_fail (sql_be != NULL, NULL);
 
-    auto ba = gnc_balance_assertion_new (sql_be->book());
+    auto ba = gnc_reconciled_balance_new (sql_be->book());
 
-    gnc_balance_assertion_begin_edit (ba);
-    gnc_sql_load_object (sql_be, row, GNC_ID_BALANCE_ASSERTION, ba, col_table);
-    gnc_balance_assertion_commit_edit (ba);
+    gnc_reconciled_balance_begin_edit (ba);
+    gnc_sql_load_object (sql_be, row, GNC_ID_RECONCILED_BALANCE, ba, col_table);
+    gnc_reconciled_balance_commit_edit (ba);
 
     return ba;
 }
 
 void
-GncSqlBalanceAssertionBackend::load_all (GncSqlBackend* sql_be)
+GncSqlReconciledBalanceBackend::load_all (GncSqlBackend* sql_be)
 {
     g_return_if_fail (sql_be != NULL);
 
@@ -92,17 +91,17 @@ GncSqlBalanceAssertionBackend::load_all (GncSqlBackend* sql_be)
         return;
 
     for (auto row : *result)
-        load_single_balance_assertion (sql_be, row);
+        load_single_reconciled_balance (sql_be, row);
 
     auto subquery = g_strdup_printf ("SELECT DISTINCT guid FROM %s", TABLE_NAME);
     gnc_sql_slots_load_for_sql_subquery (sql_be, subquery,
-                                         (BookLookupFn)gnc_balance_assertion_lookup);
+                                         (BookLookupFn)gnc_reconciled_balance_lookup);
     g_free (subquery);
 }
 
 /* ================================================================= */
 void
-GncSqlBalanceAssertionBackend::create_tables (GncSqlBackend* sql_be)
+GncSqlReconciledBalanceBackend::create_tables (GncSqlBackend* sql_be)
 {
     g_return_if_fail (sql_be != NULL);
 
@@ -112,7 +111,7 @@ GncSqlBalanceAssertionBackend::create_tables (GncSqlBackend* sql_be)
 }
 
 static void
-do_save_balance_assertion (QofInstance* inst, gpointer data)
+do_save_reconciled_balance (QofInstance* inst, gpointer data)
 {
     auto s = reinterpret_cast<write_objects_t*>(data);
 
@@ -121,14 +120,14 @@ do_save_balance_assertion (QofInstance* inst, gpointer data)
 }
 
 bool
-GncSqlBalanceAssertionBackend::write (GncSqlBackend* sql_be)
+GncSqlReconciledBalanceBackend::write (GncSqlBackend* sql_be)
 {
     g_return_val_if_fail (sql_be != NULL, FALSE);
     write_objects_t data{sql_be, true, this};
 
     qof_collection_foreach (qof_book_get_collection (sql_be->book(),
-                                                     GNC_ID_BALANCE_ASSERTION),
-                            (QofInstanceForeachCB)do_save_balance_assertion,
+                                                     GNC_ID_RECONCILED_BALANCE),
+                            (QofInstanceForeachCB)do_save_reconciled_balance,
                             &data);
     return data.is_ok;
 }

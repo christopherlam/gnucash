@@ -1,5 +1,5 @@
 /********************************************************************\
- * dialog-balance-assertion.h -- balance assertion dialog            *
+ * dialog-reconciled-balance.h -- reconciled balance dialog            *
  *                                                                  *
  * This program is free software; you can redistribute it and/or    *
  * modify it under the terms of the GNU General Public License as   *
@@ -19,28 +19,28 @@
  * Boston, MA  02110-1301,  USA       gnu@gnu.org                   *
 \********************************************************************/
 
-#ifndef DIALOG_BALANCE_ASSERTION_H
-#define DIALOG_BALANCE_ASSERTION_H
+#ifndef DIALOG_RECONCILED_BALANCE_H
+#define DIALOG_RECONCILED_BALANCE_H
 
 #include <gtk/gtk.h>
 #include "Account.h"
 
-/** Show the balance assertions for @a account, and let the user add or
+/** Show the reconciled balances for @a account, and let the user add or
  *  remove them.  If a dialog is already open for the account it is
  *  raised instead of a second one being created.
  *
  *  @param parent The parent window.
- *  @param account The account whose assertions to show.
+ *  @param account The account whose reconciled balances to show.
  */
-void gnc_balance_assertion_dialog (GtkWindow *parent, Account *account);
+void gnc_reconciled_balance_dialog (GtkWindow *parent, Account *account);
 
-/** As gnc_balance_assertion_dialog(), but pre-fill the entry row with
+/** As gnc_reconciled_balance_dialog(), but pre-fill the entry row with
  *  @a date and the account's balance on that date.  This is what the
  *  register uses: the user picks the row matching their statement and
  *  the figures are already there to confirm.
  */
-void gnc_balance_assertion_dialog_for_date (GtkWindow *parent,
+void gnc_reconciled_balance_dialog_for_date (GtkWindow *parent,
                                             Account *account,
                                             time64 date);
 
-#endif /* DIALOG_BALANCE_ASSERTION_H */
+#endif /* DIALOG_RECONCILED_BALANCE_H */

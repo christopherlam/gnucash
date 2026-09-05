@@ -14,7 +14,7 @@ set (gtkbuilder_SOURCES
         business-prefs.glade
         dialog-account-picker.glade
         dialog-account.glade
-        dialog-balance-assertion.glade
+        dialog-reconciled-balance.glade
         dialog-doclink.glade
         dialog-bi-import-gui.glade
         dialog-billterms.glade

@@ -10,7 +10,7 @@ set (gnc_gnome_noinst_HEADERS
   business-options-gnome.h
   business-urls.h
   business-gnome-utils.h
-  dialog-balance-assertion.h
+  dialog-reconciled-balance.h
   dialog-doclink.h
   dialog-billterms.h
   dialog-choose-owner.h
@@ -76,7 +76,7 @@ set (gnc_gnome_SOURCES
   business-options-gnome.cpp
   business-urls.c
   business-gnome-utils.c
-  dialog-balance-assertion.cpp
+  dialog-reconciled-balance.cpp
   dialog-doclink.c
   dialog-billterms.c
   dialog-choose-owner.c
