@@ -30,10 +30,11 @@
 
 #include <stdarg.h>
 
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <boost/unordered/unordered_flat_map.hpp>
 
 #include "gnc-engine.h"
 
@@ -154,7 +155,7 @@ typedef struct sixtp
     /* called to cleanup character results when cleaning up this node's
        children. */
 
-    std::map<std::string, sixtp*> child_parsers;
+    boost::unordered_flat_map<std::string, sixtp*> child_parsers;
 } sixtp;
 
 typedef enum

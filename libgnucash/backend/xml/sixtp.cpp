@@ -270,7 +270,7 @@ sixtp_add_sub_parser (sixtp* parser, const gchar* tag, sixtp* sub_parser)
     g_return_val_if_fail (tag, FALSE);
     g_return_val_if_fail (sub_parser, FALSE);
 
-    parser->child_parsers[tag] = sub_parser;
+    parser->child_parsers.insert_or_assign (tag, sub_parser);
     return (TRUE);
 }
 
@@ -393,7 +393,7 @@ sixtp_sax_start_handler (void* user_data,
     }
 
     /* now allocate the new stack frame and shift to it */
-    pdata->stack.push_back (std::make_unique<sixtp_stack_frame> (
+    pdata->stack.emplace_back (std::make_unique<sixtp_stack_frame> (
         next_parser, g_strdup ((char*) name)));
     sixtp_stack_frame* new_frame = pdata->stack.back ().get ();
 

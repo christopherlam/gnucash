@@ -94,7 +94,7 @@ sixtp_context_new (sixtp* initial_parser, gpointer global_data,
 
     ret->data.global_data = global_data;
 
-    ret->data.stack.push_back (
+    ret->data.stack.emplace_back (
         std::make_unique<sixtp_stack_frame> (initial_parser, nullptr));
     ret->top_frame = ret->data.stack.back ().get ();
 
