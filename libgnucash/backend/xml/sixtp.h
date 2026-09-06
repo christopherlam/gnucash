@@ -29,6 +29,12 @@
 #include <stdio.h>
 
 #include <stdarg.h>
+
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "gnc-engine.h"
 
 #include "gnc-xml-helper.h"
@@ -129,26 +135,26 @@ typedef void (*sixtp_push_handler) (xmlParserCtxtPtr xml_context,
 typedef struct sixtp
 {
     /* If you change this, don't forget to modify all the copy/etc. functions */
-    sixtp_start_handler start_handler;
-    sixtp_before_child_handler before_child;
-    sixtp_after_child_handler after_child;
-    sixtp_end_handler end_handler;
-    sixtp_characters_handler characters_handler;
+    sixtp_start_handler start_handler = nullptr;
+    sixtp_before_child_handler before_child = nullptr;
+    sixtp_after_child_handler after_child = nullptr;
+    sixtp_end_handler end_handler = nullptr;
+    sixtp_characters_handler characters_handler = nullptr;
 
-    sixtp_fail_handler fail_handler;
+    sixtp_fail_handler fail_handler = nullptr;
     /* called for failures before the close tag */
 
-    sixtp_result_handler cleanup_result; /* called unless failure */
-    sixtp_result_handler cleanup_chars; /* called unless failure */
+    sixtp_result_handler cleanup_result = nullptr; /* called unless failure */
+    sixtp_result_handler cleanup_chars = nullptr; /* called unless failure */
 
-    sixtp_result_handler result_fail_handler;
+    sixtp_result_handler result_fail_handler = nullptr;
     /* called to cleanup results from this node on failure */
 
-    sixtp_result_handler chars_fail_handler;
+    sixtp_result_handler chars_fail_handler = nullptr;
     /* called to cleanup character results when cleaning up this node's
        children. */
 
-    GHashTable* child_parsers;
+    std::map<std::string, sixtp*> child_parsers;
 } sixtp;
 
 typedef enum
@@ -182,21 +188,26 @@ typedef enum
 
 struct _sixtp_child_result
 {
-    sixtp_child_result_type type;
-    gchar* tag; /* NULL for a CHARS node. */
-    gpointer data;
-    gboolean should_cleanup;
-    sixtp_result_handler cleanup_handler;
-    sixtp_result_handler fail_handler;
+    sixtp_child_result_type type = SIXTP_CHILD_RESULT_CHARS;
+    gchar* tag = nullptr; /* NULL for a CHARS node. */
+    gpointer data = nullptr;
+    gboolean should_cleanup = FALSE;
+    sixtp_result_handler cleanup_handler = nullptr;
+    sixtp_result_handler fail_handler = nullptr;
 };
+
+/* Full definition lives in sixtp-stack.h; the parser's frame stack owns
+   its frames, so a stack is just a vector of them. */
+struct sixtp_stack_frame;
+using sixtp_frame_stack = std::vector<std::unique_ptr<sixtp_stack_frame>>;
 
 typedef struct sixtp_sax_data
 {
-    gboolean parsing_ok;
-    GSList* stack;
-    gpointer global_data;
-    xmlParserCtxtPtr saxParserCtxt;
-    sixtp* bad_xml_parser;
+    gboolean parsing_ok = TRUE;
+    sixtp_frame_stack stack;
+    gpointer global_data = nullptr;
+    xmlParserCtxtPtr saxParserCtxt = nullptr;
+    sixtp* bad_xml_parser = nullptr;
 } sixtp_sax_data;
 
 gboolean is_child_result_from_node_named (sixtp_child_result* cr,

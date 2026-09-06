@@ -27,37 +27,37 @@
 
 #include "sixtp.h"
 
-typedef struct sixtp_stack_frame
+struct sixtp_stack_frame
 {
     sixtp* parser;
-    gchar* tag;
-    gpointer data_for_children;
-    GSList* data_from_children; /* in reverse chronological order */
-    gpointer frame_data;
+    gchar* tag; /* owned by the caller, not freed here; see sixtp.cpp */
+    gpointer data_for_children = nullptr;
+    GSList* data_from_children = nullptr; /* in reverse chronological order */
+    gpointer frame_data = nullptr;
 
     /* Line and column [of the start tag]; set during parsing. */
-    int line;
-    int col;
-} sixtp_stack_frame;
+    int line = -1;
+    int col = -1;
+
+    sixtp_stack_frame (sixtp* next_parser, gchar* tag);
+    ~sixtp_stack_frame ();
+
+    sixtp_stack_frame (const sixtp_stack_frame&) = delete;
+    sixtp_stack_frame& operator= (const sixtp_stack_frame&) = delete;
+};
 
 struct _sixtp_parser_context_struct
 {
-    xmlSAXHandler handler;
+    xmlSAXHandler handler {};
     sixtp_sax_data data;
-    sixtp_stack_frame* top_frame;
-    gpointer top_frame_data;
+    sixtp_stack_frame* top_frame = nullptr; /* non-owning: owned by data.stack */
+    gpointer top_frame_data = nullptr;
 };
 typedef struct _sixtp_parser_context_struct sixtp_parser_context;
 
-void sixtp_stack_frame_destroy (sixtp_stack_frame* sf);
-
 void sixtp_stack_frame_print (sixtp_stack_frame* sf, gint indent, FILE* f);
 
-GSList* sixtp_pop_and_destroy_frame (GSList* frame_stack);
-
-void sixtp_print_frame_stack (GSList* stack, FILE* f);
-
-sixtp_stack_frame* sixtp_stack_frame_new (sixtp* next_parser, char* tag);
+void sixtp_print_frame_stack (const sixtp_frame_stack& stack, FILE* f);
 
 sixtp_parser_context* sixtp_context_new (sixtp* initial_parser,
                                          gpointer global_data,

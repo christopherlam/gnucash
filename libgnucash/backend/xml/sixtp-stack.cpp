@@ -24,36 +24,17 @@
 #include "sixtp.h"
 #include "sixtp-stack.h"
 
-void
-sixtp_stack_frame_destroy (sixtp_stack_frame* sf)
+sixtp_stack_frame::sixtp_stack_frame (sixtp* next_parser, gchar* tag)
+    : parser (next_parser), tag (tag)
 {
-    GSList* lp;
-
-    /* cleanup all the child data */
-    for (lp = sf->data_from_children; lp; lp = lp->next)
-    {
-        sixtp_child_result_destroy ((sixtp_child_result*) lp->data);
-    }
-    g_slist_free (sf->data_from_children);
-    sf->data_from_children = NULL;
-
-    g_free (sf);
 }
 
-sixtp_stack_frame*
-sixtp_stack_frame_new (sixtp* next_parser, char* tag)
+sixtp_stack_frame::~sixtp_stack_frame ()
 {
-    sixtp_stack_frame* new_frame;
-
-    new_frame = g_new0 (sixtp_stack_frame, 1);
-    new_frame->parser = next_parser;
-    new_frame->tag = tag;
-    new_frame->data_for_children = NULL;
-    new_frame->data_from_children = NULL;
-    new_frame->frame_data = NULL;
-    new_frame->line = new_frame->col = -1;
-
-    return new_frame;
+    /* cleanup all the child data */
+    for (GSList* lp = data_from_children; lp; lp = lp->next)
+        sixtp_child_result_destroy (static_cast<sixtp_child_result*> (lp->data));
+    g_slist_free (data_from_children);
 }
 
 void
@@ -84,33 +65,18 @@ sixtp_stack_frame_print (sixtp_stack_frame* sf, gint indent, FILE* f)
     g_free (is);
 }
 
-GSList*
-sixtp_pop_and_destroy_frame (GSList* frame_stack)
-{
-    sixtp_stack_frame* dead_frame = (sixtp_stack_frame*) frame_stack->data;
-    GSList* result;
-
-    result = g_slist_next (frame_stack);
-    sixtp_stack_frame_destroy (dead_frame);
-    g_slist_free_1 (frame_stack);
-    return (result);
-}
-
 void
-sixtp_print_frame_stack (GSList* stack, FILE* f)
+sixtp_print_frame_stack (const sixtp_frame_stack& stack, FILE* f)
 {
-    /* first, some debugging output */
-    GSList* printcopy = g_slist_reverse (g_slist_copy (stack));
-    GSList* lp;
+    /* Frames are stored oldest-first, so printing front-to-back already
+       yields the desired outermost-to-innermost order. */
     int indent = 0;
 
-    for (lp = printcopy; lp; lp = lp->next)
+    for (auto& frame : stack)
     {
-        sixtp_stack_frame* frame = (sixtp_stack_frame*) lp->data;
-        sixtp_stack_frame_print (frame, indent, f);
+        sixtp_stack_frame_print (frame.get (), indent, f);
         indent += 2;
     }
-
 }
 
 
@@ -119,25 +85,20 @@ sixtp_parser_context*
 sixtp_context_new (sixtp* initial_parser, gpointer global_data,
                    gpointer top_level_data)
 {
-    sixtp_parser_context* ret;
-
-    ret = g_new0 (sixtp_parser_context, 1);
+    auto ret = new sixtp_parser_context;
 
     ret->handler.startElement = sixtp_sax_start_handler;
     ret->handler.endElement = sixtp_sax_end_handler;
     ret->handler.characters = sixtp_sax_characters_handler;
     ret->handler.getEntity = sixtp_sax_get_entity_handler;
 
-    ret->data.parsing_ok = TRUE;
-    ret->data.stack = NULL;
     ret->data.global_data = global_data;
 
-    ret->top_frame = sixtp_stack_frame_new (initial_parser, NULL);
+    ret->data.stack.push_back (
+        std::make_unique<sixtp_stack_frame> (initial_parser, nullptr));
+    ret->top_frame = ret->data.stack.back ().get ();
 
     ret->top_frame_data = top_level_data;
-
-    ret->data.stack = g_slist_prepend (ret->data.stack,
-                                       (gpointer) ret->top_frame);
 
     if (initial_parser->start_handler)
     {
@@ -177,11 +138,12 @@ sixtp_context_run_end_handler (sixtp_parser_context* ctxt)
 void
 sixtp_context_destroy (sixtp_parser_context* context)
 {
-    sixtp_stack_frame_destroy (context->top_frame);
-    g_slist_free (context->data.stack);
+    /* context->data.stack (a vector of unique_ptr<sixtp_stack_frame>) tears
+       down every remaining frame -- including top_frame -- when it is
+       destroyed below, so there's nothing to free here by hand. */
     context->data.saxParserCtxt->userData = NULL;
     context->data.saxParserCtxt->sax = NULL;
     xmlFreeParserCtxt (context->data.saxParserCtxt);
     context->data.saxParserCtxt = NULL;
-    g_free (context);
+    delete context;
 }
