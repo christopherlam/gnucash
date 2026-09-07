@@ -195,6 +195,15 @@ void qof_session_begin (QofSession *session, const char * new_uri,
  * for each session, each time wiping out the old books; this seems
  * wrong to me, and should be restricted to allow only one load per
  * session.
+ *
+ * IMPORTANT: on any load failure, this destroys the session's current
+ * QofBook and replaces it with a freshly created, empty one. Any
+ * QofBook* obtained before this call (e.g. from qof_session_new() or a
+ * prior qof_session_get_book()) is invalidated and must not be read
+ * from or passed to qof_book_destroy() afterward - doing so double-frees
+ * the original book. Always call qof_session_get_book() again after
+ * qof_session_load() returns, regardless of whether it succeeded, to
+ * get the QofBook that is actually still alive.
  */
 typedef void (*QofPercentageFunc) (const char *message, double percent);
 void qof_session_load (QofSession *session,

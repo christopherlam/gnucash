@@ -237,6 +237,14 @@ QofSessionImpl::load (QofPercentageFunc percentage_func) noexcept
         (err != ERR_SQL_DB_TOO_NEW))
     {
         // Something failed, delete and restore new ones.
+        //
+        // NOTE: this destroys the QofBook the caller may already be
+        // holding a pointer to (from qof_session_new() or an earlier
+        // qof_session_get_book()). That pointer is now dangling; the
+        // caller must call qof_session_get_book() again rather than
+        // reuse it, and must never pass it to qof_book_destroy() -
+        // doing so double-frees m_book. See qof_session_load()'s
+        // doc comment in qofsession.h.
         destroy_backend();
         qof_book_destroy (m_book);
         m_book = qof_book_new();
