@@ -1,7 +1,7 @@
 /********************************************************************\
  * test-xml-reader-edge-cases.cpp -- exhaustive edge-case tests for *
- * the libxml2-DOM-built XML v2 reader (sixtp-to-dom-parser.cpp,    *
- * sixtp-dom-parsers.cpp)                                           *
+ * the SAX-built GncXmlNode reader (gnc-xml-sax-node.*,             *
+ * sixtp-to-dom-parser.cpp, sixtp-dom-parsers.cpp)                  *
  *                                                                  *
  * Copyright (C) 2026 The GnuCash Project                          *
  *                                                                  *
@@ -25,25 +25,16 @@
 \********************************************************************/
 /** @file test-xml-reader-edge-cases.cpp
  *
- * This exercises the read side of the v2 XML backend (the real libxml2
- * xmlNode tree that sixtp_dom_parser_new builds, plus dom_tree_to_*)
- * against inputs a reader has to deal with: Unicode content split
- * across SAX characters() chunk boundaries, CDATA, comments, mixed
- * content, malformed/non-well-formed XML, and domain-level validation
- * failures (unknown tags, missing required fields).
- *
- * This file is a deliberate baseline: it is meant to land on stable
- * first, against the pre-existing xmlNodePtr/libxml2-DOM reader, so
- * its pass/fail results are on record before the SAX-tree rewrite
- * (which replaces xmlNodePtr with a lightweight GncXmlNode on the read
- * side only) lands on top of it. That follow-up change adapts this
- * same suite call-for-call to the new node type; an unchanged set of
- * passes across both versions is the evidence that the rewrite altered
- * no observable reader behavior.
+ * This exercises the read side of the v2 XML backend (GncXmlNode,
+ * sixtp_dom_parser_new, dom_tree_to_*) against inputs a real DOM-based
+ * parser would also have had to deal with: Unicode content split across
+ * SAX characters() chunk boundaries, CDATA, comments, mixed content,
+ * malformed/non-well-formed XML, and domain-level validation failures
+ * (unknown tags, missing required fields).
  *
  * Two harnesses are used deliberately:
  *
- *  - A bare sixtp parser (parse_one_element/parse_wrapped), used for
+ *  - A bare sixtp parser (build_wrapped_parser/parse_string), used for
  *    every case that is *expected* to fail (well-formedness or
  *    domain-validation failures). This mirrors gnc_read_example_account's
  *    wrapping pattern and stops short of a full QofSession/QofBook
@@ -55,13 +46,11 @@
  * This split is intentional, not incidental: a full QofBook that
  * registers business objects (via cashobjects_register) and is then
  * destroyed after a *partially failed* account parse currently crashes
- * in gncTaxTable's per-book teardown (_gncTaxTableDestroy). This is a
- * pre-existing bug in QofSession::load()'s failure path (see the
- * "IMPORTANT" note on qof_session_load's doc comment in qofsession.h):
- * on load failure it destroys and replaces the session's QofBook out
- * from under any pointer callers already hold to it. It reproduces
- * identically regardless of which xmlNode type the reader builds, so
- * it is unrelated to this reader and intentionally not exercised here.
+ * in gncTaxTable's per-book teardown (_gncTaxTableDestroy) - confirmed
+ * to reproduce identically on the pre-SAX-rewrite code, so it is a
+ * pre-existing bug unrelated to this reader and intentionally not
+ * exercised here (tracked separately; see the session notes for
+ * xml-sax-stream-read).
  */
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -83,6 +72,7 @@
 #include "sixtp-parsers.h"
 #include "sixtp-utils.h"
 #include "sixtp-dom-parsers.h"
+#include "gnc-xml-sax-node.h"
 #include "gnc-xml.h"
 #include "io-gncxml-gen.h"
 #include "io-gncxml-v2.h"
@@ -90,28 +80,28 @@
 #include <test-stuff.h>
 #include <test-engine-stuff.h>
 
-extern KvpFrame* dom_tree_to_kvp_frame (xmlNodePtr node);
+extern KvpFrame* dom_tree_to_kvp_frame (GncXmlNode* node);
 
 #define GNC_LIB_NAME "gncmod-backend-xml"
 #define GNC_LIB_REL_PATH "xml"
 
 /***********************************************************************/
-/* Small helpers for building xmlNode trees by hand, and for driving
+/* Small helpers for building GncXmlNode trees by hand, and for driving
    a real sixtp parser over a raw XML string without going through a
    full QofSession. */
 
-static xmlNodePtr
+static GncXmlNode*
 build_leaf (const char* tag, const char* text)
 {
-    xmlNodePtr node = xmlNewNode (NULL, BAD_CAST tag);
+    GncXmlNode* node = gnc_xml_node_new_element (tag);
     if (text)
-        xmlNodeAddContentLen (node, BAD_CAST text, strlen (text));
+        gnc_xml_node_add_content (node, text, strlen (text));
     return node;
 }
 
 struct capture_pdata
 {
-    xmlNodePtr tree = nullptr;
+    GncXmlNode* tree = nullptr;
 };
 
 static gboolean
@@ -123,14 +113,14 @@ capture_end_handler (gpointer data_for_children, GSList*, GSList*,
         return TRUE;
 
     auto pdata = static_cast<capture_pdata*> (global_data);
-    pdata->tree = static_cast<xmlNodePtr> (data_for_children);
+    pdata->tree = static_cast<GncXmlNode*> (data_for_children);
     /* Hand ownership to pdata->tree; caller frees it. */
     return TRUE;
 }
 
 /* Parses a single top-level element ('tag') out of 'xml' and returns
-   its captured xmlNode tree (caller must xmlFreeNode it), or nullptr
-   if parsing failed (malformed XML, wrong root tag, etc).
+   its captured GncXmlNode tree (caller must gnc_xml_node_free it), or
+   nullptr if parsing failed (malformed XML, wrong root tag, etc).
 
    The dom_parser is deliberately nested one level under a synthetic
    wrapping tag rather than being used bare as the top-level sixtp.
@@ -143,7 +133,7 @@ capture_end_handler (gpointer data_for_children, GSList*, GSList*,
    relying on that bootstrap call at all: the outer wrapper's generic
    (non-DOM) start/end handling supplies a genuine NULL parent_data to
    the dom_parser's own first invocation. */
-static xmlNodePtr
+static GncXmlNode*
 parse_one_element (const char* tag, const std::string& xml)
 {
     capture_pdata pdata;
@@ -170,7 +160,7 @@ parse_one_element (const char* tag, const std::string& xml)
     if (!ok)
     {
         if (pdata.tree)
-            xmlFreeNode (pdata.tree);
+            gnc_xml_node_free (pdata.tree);
         return nullptr;
     }
     return pdata.tree;
@@ -227,7 +217,7 @@ parse_wrapped (sixtp* (*parser_create) (void), const char* child_tag,
 }
 
 /***********************************************************************/
-/* 1. xmlNode primitive behavior: UTF-8, chunking, attributes           */
+/* 1. GncXmlNode primitive behavior: UTF-8, chunking, attributes        */
 /***********************************************************************/
 
 static void
@@ -236,11 +226,11 @@ test_utf8_round_trip (void)
     /* 2-byte, 3-byte and 4-byte UTF-8 sequences in one string. */
     const char* utf8 = "caf\xC3\xA9 \xE4\xB8\xAD\xE6\x96\x87 \xF0\x9F\x98\x80";
 
-    xmlNodePtr node = build_leaf ("test", utf8);
+    GncXmlNode* node = build_leaf ("test", utf8);
     auto text = dom_tree_to_text (node);
     do_test (text.has_value () && *text == utf8,
              "UTF-8 content round-trips through a single add_content call");
-    xmlFreeNode (node);
+    gnc_xml_node_free (node);
 }
 
 static void
@@ -251,17 +241,15 @@ test_utf8_chunked_across_codepoint_boundary (void)
 
     /* Split at every possible byte offset, including offsets that land
        mid-way through a multi-byte UTF-8 sequence. sixtp's characters()
-       callback delivers a byte length, not a character count, and the
-       xmlNode content buffer must reassemble correctly regardless of
-       where a SAX chunk boundary happens to fall. This mirrors exactly
-       how dom_chars_handler feeds each chunk to xmlNodeAddContentLen in
-       production. */
+       callback delivers a byte length, not a character count, and
+       GncXmlNode must reassemble correctly regardless of where a SAX
+       chunk boundary happens to fall. */
     gboolean all_ok = TRUE;
     for (size_t split = 0; split <= len; ++split)
     {
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "test");
-        xmlNodeAddContentLen (node, BAD_CAST utf8, (int)split);
-        xmlNodeAddContentLen (node, BAD_CAST (utf8 + split), (int)(len - split));
+        GncXmlNode* node = gnc_xml_node_new_element ("test");
+        gnc_xml_node_add_content (node, utf8, (int)split);
+        gnc_xml_node_add_content (node, utf8 + split, (int)(len - split));
         auto text = dom_tree_to_text (node);
         if (!text || *text != utf8)
         {
@@ -270,7 +258,7 @@ test_utf8_chunked_across_codepoint_boundary (void)
                           "split at byte %zu produced [%s]",
                           split, text ? text->c_str () : "(null)");
         }
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     do_test (all_ok, "UTF-8 reassembles correctly for every possible chunk split point");
 }
@@ -278,90 +266,94 @@ test_utf8_chunked_across_codepoint_boundary (void)
 static void
 test_attribute_set_get (void)
 {
-    xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "test");
+    GncXmlNode* node = gnc_xml_node_new_element ("test");
 
-    do_test (xmlGetProp (node, BAD_CAST "missing") == NULL,
+    do_test (gnc_xml_get_prop (node, "missing") == NULL,
              "missing attribute lookup returns NULL");
 
-    xmlSetProp (node, BAD_CAST "version", BAD_CAST "2.0.0");
-    xmlChar* v = xmlGetProp (node, BAD_CAST "version");
-    do_test (v && g_strcmp0 ((char*)v, "2.0.0") == 0, "attribute set/get round-trips");
-    xmlFree (v);
+    gnc_xml_node_set_prop (node, "version", "2.0.0");
+    char* v = gnc_xml_get_prop (node, "version");
+    do_test (v && g_strcmp0 (v, "2.0.0") == 0, "attribute set/get round-trips");
+    g_free (v);
 
     /* overwrite */
-    xmlSetProp (node, BAD_CAST "version", BAD_CAST "3.0.0");
-    v = xmlGetProp (node, BAD_CAST "version");
-    do_test (v && g_strcmp0 ((char*)v, "3.0.0") == 0, "re-setting an attribute overwrites it, doesn't duplicate");
-    xmlFree (v);
+    gnc_xml_node_set_prop (node, "version", "3.0.0");
+    v = gnc_xml_get_prop (node, "version");
+    do_test (v && g_strcmp0 (v, "3.0.0") == 0, "re-setting an attribute overwrites it, doesn't duplicate");
+    g_free (v);
 
     /* unicode attribute value */
-    xmlSetProp (node, BAD_CAST "note", BAD_CAST "caf\xC3\xA9");
-    v = xmlGetProp (node, BAD_CAST "note");
-    do_test (v && g_strcmp0 ((char*)v, "caf\xC3\xA9") == 0, "UTF-8 attribute value round-trips");
-    xmlFree (v);
+    gnc_xml_node_set_prop (node, "note", "caf\xC3\xA9");
+    v = gnc_xml_get_prop (node, "note");
+    do_test (v && g_strcmp0 (v, "caf\xC3\xA9") == 0, "UTF-8 attribute value round-trips");
+    g_free (v);
 
-    xmlFreeNode (node);
+    gnc_xml_node_free (node);
 }
 
 static void
 test_node_list_get_string_sibling_only (void)
 {
-    /* <leaf>100<b/>200</leaf> - xmlNodeListGetString walks direct
-       siblings only, it does not recurse into <b>'s own children.
-       Text that IS a direct sibling of a nested element (the "200"
-       here) is still correctly captured even though <b/> sits between
-       the two text runs. */
-    xmlNodePtr leaf = xmlNewNode (NULL, BAD_CAST "leaf");
-    xmlNodeAddContentLen (leaf, BAD_CAST "100", 3);
-    xmlNewChild (leaf, NULL, BAD_CAST "b", NULL);
-    xmlNodeAddContentLen (leaf, BAD_CAST "200", 3);
+    /* <leaf>100<b/>200</leaf> - gnc_xml_node_list_get_string walks
+       direct siblings only (matching libxml2's xmlNodeListGetString),
+       it does not recurse into <b>'s own children. Text that IS a
+       direct sibling of a nested element (the "200" here) is still
+       correctly captured even though <b/> sits between the two text
+       runs. */
+    GncXmlNode* leaf = gnc_xml_node_new_element ("leaf");
+    gnc_xml_node_add_content (leaf, "100", 3);
+    gnc_xml_node_new_child (leaf, "b");
+    gnc_xml_node_add_content (leaf, "200", 3);
 
-    xmlChar* result = xmlNodeListGetString (NULL, leaf->xmlChildrenNode, TRUE);
-    do_test_args (g_strcmp0 ((char*)result, "100200") == 0,
-                  "xmlNodeListGetString", __FILE__, __LINE__,
-                  "expected [100200], got [%s]", (char*)result);
-    xmlFree (result);
-    xmlFreeNode (leaf);
+    char* result = gnc_xml_node_list_get_string (leaf->children);
+    do_test_args (g_strcmp0 (result, "100200") == 0,
+                  "gnc_xml_node_list_get_string", __FILE__, __LINE__,
+                  "expected [100200], got [%s]", result);
+    g_free (result);
+    gnc_xml_node_free (leaf);
 }
 
 static void
 test_node_list_get_string_does_not_recurse (void)
 {
     /* <leaf>100<b>NESTED</b>200</leaf> - text genuinely nested INSIDE
-       <b> is not visible to a sibling-only walk. */
-    xmlNodePtr leaf = xmlNewNode (NULL, BAD_CAST "leaf");
-    xmlNodeAddContentLen (leaf, BAD_CAST "100", 3);
-    xmlNodePtr b = xmlNewChild (leaf, NULL, BAD_CAST "b", NULL);
-    xmlNodeAddContentLen (b, BAD_CAST "NESTED", 6);
-    xmlNodeAddContentLen (leaf, BAD_CAST "200", 3);
+       <b> is not visible to a sibling-only walk. This matches
+       xmlNodeListGetString's behavior exactly (verified empirically
+       against real libxml2), so it is not a regression - GnuCash's own
+       writer never produces this shape. */
+    GncXmlNode* leaf = gnc_xml_node_new_element ("leaf");
+    gnc_xml_node_add_content (leaf, "100", 3);
+    GncXmlNode* b = gnc_xml_node_new_child (leaf, "b");
+    gnc_xml_node_add_content (b, "NESTED", 6);
+    gnc_xml_node_add_content (leaf, "200", 3);
 
-    xmlChar* result = xmlNodeListGetString (NULL, leaf->xmlChildrenNode, TRUE);
-    do_test_args (g_strcmp0 ((char*)result, "100200") == 0,
-                  "xmlNodeListGetString ignores nested element text",
-                  __FILE__, __LINE__, "expected [100200], got [%s]", (char*)result);
-    xmlFree (result);
-    xmlFreeNode (leaf);
+    char* result = gnc_xml_node_list_get_string (leaf->children);
+    do_test_args (g_strcmp0 (result, "100200") == 0,
+                  "gnc_xml_node_list_get_string ignores nested element text",
+                  __FILE__, __LINE__, "expected [100200], got [%s]", result);
+    g_free (result);
+    gnc_xml_node_free (leaf);
 }
 
 static void
 test_node_free_null_is_safe (void)
 {
-    xmlFreeNode (NULL);
-    success ("xmlFreeNode(NULL) does not crash");
+    gnc_xml_node_free (NULL);
+    success ("gnc_xml_node_free(NULL) does not crash");
 }
 
 static void
 test_empty_element_has_no_children (void)
 {
-    xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "empty");
+    GncXmlNode* node = gnc_xml_node_new_element ("empty");
     do_test (node->children == NULL, "a freshly created node has no children");
     do_test (node->properties == NULL, "a freshly created node has no attributes");
     do_test (node->next == NULL && node->prev == NULL, "a freshly created node has no siblings");
-    xmlFreeNode (node);
+    gnc_xml_node_free (node);
 }
 
 /***********************************************************************/
-/* 2. xmlReadMemory: fidelity of a standalone parse used by tests       */
+/* 2. gnc_xml_node_from_libxml: fidelity of the writer -> reader bridge */
 /***********************************************************************/
 
 static void
@@ -371,23 +363,26 @@ test_from_libxml_preserves_structure (void)
     xmlDocPtr doc = xmlReadMemory (xml_text, strlen (xml_text), "test.xml", NULL, 0);
     xmlNodePtr root = xmlDocGetRootElement (doc);
 
-    do_test (g_strcmp0 ((char*)root->name, "root") == 0, "xmlReadMemory preserves element name");
+    GncXmlNode* conv = gnc_xml_node_from_libxml (root);
 
-    xmlChar* a1 = xmlGetProp (root, BAD_CAST "attr1");
-    xmlChar* a2 = xmlGetProp (root, BAD_CAST "attr2");
-    do_test (a1 && g_strcmp0 ((char*)a1, "v1") == 0, "xmlReadMemory preserves first attribute");
-    do_test (a2 && g_strcmp0 ((char*)a2, "v2") == 0, "xmlReadMemory preserves second attribute");
-    xmlFree (a1);
-    xmlFree (a2);
+    do_test (g_strcmp0 (conv->name, "root") == 0, "from_libxml preserves element name");
 
-    do_test (root->children != NULL && g_strcmp0 ((char*)root->children->name, "a") == 0,
-             "xmlReadMemory preserves first child");
-    do_test (root->children->next != NULL && g_strcmp0 ((char*)root->children->next->name, "b") == 0,
-             "xmlReadMemory preserves second child as a sibling");
+    char* a1 = gnc_xml_get_prop (conv, "attr1");
+    char* a2 = gnc_xml_get_prop (conv, "attr2");
+    do_test (a1 && g_strcmp0 (a1, "v1") == 0, "from_libxml preserves first attribute");
+    do_test (a2 && g_strcmp0 (a2, "v2") == 0, "from_libxml preserves second attribute");
+    g_free (a1);
+    g_free (a2);
 
-    auto text_a = dom_tree_to_text (root->children);
-    do_test (text_a.has_value () && *text_a == "text-a", "xmlReadMemory preserves child text content");
+    do_test (conv->children != NULL && g_strcmp0 (conv->children->name, "a") == 0,
+             "from_libxml preserves first child");
+    do_test (conv->children->next != NULL && g_strcmp0 (conv->children->next->name, "b") == 0,
+             "from_libxml preserves second child as a sibling");
 
+    auto text_a = dom_tree_to_text (conv->children);
+    do_test (text_a.has_value () && *text_a == "text-a", "from_libxml preserves child text content");
+
+    gnc_xml_node_free (conv);
     xmlFreeDoc (doc);
 }
 
@@ -405,41 +400,41 @@ test_dom_tree_to_guid_variants (void)
     guid_to_string_buff (&g, buf);
 
     {
-        xmlNodePtr node = build_leaf ("id", buf);
-        xmlSetProp (node, BAD_CAST "type", BAD_CAST "guid");
+        GncXmlNode* node = build_leaf ("id", buf);
+        gnc_xml_node_set_prop (node, "type", "guid");
         auto result = dom_tree_to_guid (node);
         do_test (result.has_value () && guid_equal (&*result, &g), "dom_tree_to_guid: type=\"guid\"");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("id", buf);
-        xmlSetProp (node, BAD_CAST "type", BAD_CAST "new");
+        GncXmlNode* node = build_leaf ("id", buf);
+        gnc_xml_node_set_prop (node, "type", "new");
         auto result = dom_tree_to_guid (node);
         do_test (result.has_value () && guid_equal (&*result, &g), "dom_tree_to_guid: type=\"new\"");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
         /* missing type attribute entirely */
-        xmlNodePtr node = build_leaf ("id", buf);
+        GncXmlNode* node = build_leaf ("id", buf);
         auto result = dom_tree_to_guid (node);
         do_test (!result.has_value (), "dom_tree_to_guid: missing type attribute is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
         /* unrecognized type attribute */
-        xmlNodePtr node = build_leaf ("id", buf);
-        xmlSetProp (node, BAD_CAST "type", BAD_CAST "bogus");
+        GncXmlNode* node = build_leaf ("id", buf);
+        gnc_xml_node_set_prop (node, "type", "bogus");
         auto result = dom_tree_to_guid (node);
         do_test (!result.has_value (), "dom_tree_to_guid: unrecognized type attribute is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
         /* malformed guid text (wrong length / non-hex) */
-        xmlNodePtr node = build_leaf ("id", "not-a-valid-guid");
-        xmlSetProp (node, BAD_CAST "type", BAD_CAST "guid");
+        GncXmlNode* node = build_leaf ("id", "not-a-valid-guid");
+        gnc_xml_node_set_prop (node, "type", "guid");
         auto result = dom_tree_to_guid (node);
         do_test (!result.has_value (), "dom_tree_to_guid: malformed guid text is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
 }
 
@@ -457,14 +452,14 @@ test_dom_tree_to_boolean_variants (void)
     };
     for (auto& c : cases)
     {
-        xmlNodePtr node = build_leaf ("flag", c.text);
+        GncXmlNode* node = build_leaf ("flag", c.text);
         gboolean val = FALSE;
         gboolean ok = dom_tree_to_boolean (node, &val);
         do_test_args (ok == c.expect_ok && (!ok || val == c.expect_val),
                       "dom_tree_to_boolean", __FILE__, __LINE__,
                       "text=[%s] expected ok=%d val=%d, got ok=%d val=%d",
                       c.text, c.expect_ok, c.expect_val, ok, val);
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
 }
 
@@ -472,55 +467,55 @@ static void
 test_dom_tree_to_number_variants (void)
 {
     {
-        xmlNodePtr node = build_leaf ("n", "42");
+        GncXmlNode* node = build_leaf ("n", "42");
         gint64 v = 0;
         do_test (dom_tree_to_integer (node, &v) && v == 42, "dom_tree_to_integer: plain value");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "-42");
+        GncXmlNode* node = build_leaf ("n", "-42");
         gint64 v = 0;
         do_test (dom_tree_to_integer (node, &v) && v == -42, "dom_tree_to_integer: negative value");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "  42  ");
+        GncXmlNode* node = build_leaf ("n", "  42  ");
         gint64 v = 0;
         do_test (dom_tree_to_integer (node, &v) && v == 42, "dom_tree_to_integer: whitespace-padded value");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "not-a-number");
+        GncXmlNode* node = build_leaf ("n", "not-a-number");
         gint64 v = 0;
         do_test (!dom_tree_to_integer (node, &v), "dom_tree_to_integer: garbage text is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "-1");
+        GncXmlNode* node = build_leaf ("n", "-1");
         guint v = 0;
         do_test (!dom_tree_to_guint (node, &v), "dom_tree_to_guint: negative value is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "70000");
+        GncXmlNode* node = build_leaf ("n", "70000");
         guint16 v = 0;
         do_test (!dom_tree_to_guint16 (node, &v), "dom_tree_to_guint16: overflow (>65535) is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "123/100");
+        GncXmlNode* node = build_leaf ("n", "123/100");
         gnc_numeric v = gnc_numeric_zero ();
         v = dom_tree_to_gnc_numeric (node);
         do_test (!gnc_numeric_check (v) && gnc_numeric_equal (v, gnc_numeric_create (123, 100)),
                  "dom_tree_to_gnc_numeric: valid ratio");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = build_leaf ("n", "garbage");
+        GncXmlNode* node = build_leaf ("n", "garbage");
         gnc_numeric v = dom_tree_to_gnc_numeric (node);
         do_test (gnc_numeric_equal (v, gnc_numeric_zero ()),
                  "dom_tree_to_gnc_numeric: garbage text falls back to zero");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
 }
 
@@ -528,31 +523,31 @@ static void
 test_dom_tree_to_time64_variants (void)
 {
     {
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "date-posted");
-        xmlNodePtr ts = xmlNewChild (node, NULL, BAD_CAST "ts:date", NULL);
-        xmlNodeAddContentLen (ts, BAD_CAST "2020-01-01 00:00:00 +0000", 25);
+        GncXmlNode* node = gnc_xml_node_new_element ("date-posted");
+        GncXmlNode* ts = gnc_xml_node_new_child (node, "ts:date");
+        gnc_xml_node_add_content (ts, "2020-01-01 00:00:00 +0000", 25);
         time64 t = dom_tree_to_time64 (node);
         do_test (t != INT64_MAX, "dom_tree_to_time64: single ts:date parses");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
         /* missing ts:date entirely */
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "date-posted");
+        GncXmlNode* node = gnc_xml_node_new_element ("date-posted");
         time64 t = dom_tree_to_time64 (node);
         do_test (t == INT64_MAX, "dom_tree_to_time64: missing ts:date returns INT64_MAX");
-        do_test (!dom_tree_valid_time64 (t, BAD_CAST "date-posted"), "dom_tree_valid_time64 rejects INT64_MAX");
-        xmlFreeNode (node);
+        do_test (!dom_tree_valid_time64 (t, "date-posted"), "dom_tree_valid_time64 rejects INT64_MAX");
+        gnc_xml_node_free (node);
     }
     {
         /* duplicate ts:date is explicitly rejected by dom_tree_to_time64 */
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "date-posted");
-        xmlNodePtr ts1 = xmlNewChild (node, NULL, BAD_CAST "ts:date", NULL);
-        xmlNodeAddContentLen (ts1, BAD_CAST "2020-01-01 00:00:00 +0000", 25);
-        xmlNodePtr ts2 = xmlNewChild (node, NULL, BAD_CAST "ts:date", NULL);
-        xmlNodeAddContentLen (ts2, BAD_CAST "2021-01-01 00:00:00 +0000", 25);
+        GncXmlNode* node = gnc_xml_node_new_element ("date-posted");
+        GncXmlNode* ts1 = gnc_xml_node_new_child (node, "ts:date");
+        gnc_xml_node_add_content (ts1, "2020-01-01 00:00:00 +0000", 25);
+        GncXmlNode* ts2 = gnc_xml_node_new_child (node, "ts:date");
+        gnc_xml_node_add_content (ts2, "2021-01-01 00:00:00 +0000", 25);
         time64 t = dom_tree_to_time64 (node);
         do_test (t == INT64_MAX, "dom_tree_to_time64: duplicate ts:date is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
 }
 
@@ -560,27 +555,27 @@ static void
 test_dom_tree_to_gdate_variants (void)
 {
     {
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "start");
-        xmlNodePtr gd = xmlNewChild (node, NULL, BAD_CAST "gdate", NULL);
-        xmlNodeAddContentLen (gd, BAD_CAST "2020-04-03", 10);
+        GncXmlNode* node = gnc_xml_node_new_element ("start");
+        GncXmlNode* gd = gnc_xml_node_new_child (node, "gdate");
+        gnc_xml_node_add_content (gd, "2020-04-03", 10);
         GDate* d = dom_tree_to_gdate (node);
         do_test (d && g_date_valid (*&d) && g_date_get_year (d) == 2020, "dom_tree_to_gdate: valid date");
         if (d) g_date_free (d);
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "start");
-        xmlNodePtr gd = xmlNewChild (node, NULL, BAD_CAST "gdate", NULL);
-        xmlNodeAddContentLen (gd, BAD_CAST "not-a-date", 10);
+        GncXmlNode* node = gnc_xml_node_new_element ("start");
+        GncXmlNode* gd = gnc_xml_node_new_child (node, "gdate");
+        gnc_xml_node_add_content (gd, "not-a-date", 10);
         GDate* d = dom_tree_to_gdate (node);
         do_test (d == NULL, "dom_tree_to_gdate: malformed date text is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
     {
-        xmlNodePtr node = xmlNewNode (NULL, BAD_CAST "start");
+        GncXmlNode* node = gnc_xml_node_new_element ("start");
         GDate* d = dom_tree_to_gdate (node);
         do_test (d == NULL, "dom_tree_to_gdate: missing gdate child is rejected");
-        xmlFreeNode (node);
+        gnc_xml_node_free (node);
     }
 }
 
@@ -588,15 +583,15 @@ test_dom_tree_to_gdate_variants (void)
 /* 4. KVP frame round-trips: nested frames, lists, every value type     */
 /***********************************************************************/
 
-static xmlNodePtr
+static GncXmlNode*
 kvp_slot (const char* key, const char* type, const char* text_value)
 {
-    xmlNodePtr slot = xmlNewNode (NULL, BAD_CAST "slot");
-    xmlNodePtr k = xmlNewChild (slot, NULL, BAD_CAST "slot:key", NULL);
-    xmlNodeAddContentLen (k, BAD_CAST key, strlen (key));
-    xmlNodePtr v = xmlNewChild (slot, NULL, BAD_CAST "slot:value", NULL);
-    xmlSetProp (v, BAD_CAST "type", BAD_CAST type);
-    xmlNodeAddContentLen (v, BAD_CAST text_value, strlen (text_value));
+    GncXmlNode* slot = gnc_xml_node_new_element ("slot");
+    GncXmlNode* k = gnc_xml_node_new_child (slot, "slot:key");
+    gnc_xml_node_add_content (k, key, strlen (key));
+    GncXmlNode* v = gnc_xml_node_new_child (slot, "slot:value");
+    gnc_xml_node_set_prop (v, "type", type);
+    gnc_xml_node_add_content (v, text_value, strlen (text_value));
     return slot;
 }
 
@@ -610,9 +605,10 @@ test_kvp_frame_scalar_types (void)
     };
     for (auto& c : cases)
     {
-        xmlNodePtr frame_node = xmlNewNode (NULL, BAD_CAST "slots");
-        xmlNodePtr slot = kvp_slot ("k", c.type, c.text);
-        xmlAddChild (frame_node, slot);
+        GncXmlNode* frame_node = gnc_xml_node_new_element ("slots");
+        GncXmlNode* slot = kvp_slot ("k", c.type, c.text);
+        /* attach slot as a child of frame_node */
+        frame_node->children = slot;
 
         KvpFrame* frame = dom_tree_to_kvp_frame (frame_node);
         do_test_args (frame != nullptr, "dom_tree_to_kvp_frame scalar", __FILE__, __LINE__,
@@ -624,7 +620,7 @@ test_kvp_frame_scalar_types (void)
                           __FILE__, __LINE__, "type=%s", c.type);
             delete frame;
         }
-        xmlFreeNode (frame_node);
+        gnc_xml_node_free (frame_node);
     }
 }
 
@@ -634,18 +630,18 @@ test_kvp_frame_nested (void)
     /* <slots><slot><slot:key>outer</slot:key><slot:value type="frame">
          <slot><slot:key>inner</slot:key><slot:value type="integer">7</slot:value></slot>
        </slot:value></slot></slots> */
-    xmlNodePtr frame_node = xmlNewNode (NULL, BAD_CAST "slots");
-    xmlNodePtr outer_slot = xmlNewNode (NULL, BAD_CAST "slot");
-    xmlAddChild (frame_node, outer_slot);
+    GncXmlNode* frame_node = gnc_xml_node_new_element ("slots");
+    GncXmlNode* outer_slot = gnc_xml_node_new_element ("slot");
+    frame_node->children = outer_slot;
 
-    xmlNodePtr outer_key = xmlNewChild (outer_slot, NULL, BAD_CAST "slot:key", NULL);
-    xmlNodeAddContentLen (outer_key, BAD_CAST "outer", 5);
+    GncXmlNode* outer_key = gnc_xml_node_new_child (outer_slot, "slot:key");
+    gnc_xml_node_add_content (outer_key, "outer", 5);
 
-    xmlNodePtr outer_value = xmlNewChild (outer_slot, NULL, BAD_CAST "slot:value", NULL);
-    xmlSetProp (outer_value, BAD_CAST "type", BAD_CAST "frame");
+    GncXmlNode* outer_value = gnc_xml_node_new_child (outer_slot, "slot:value");
+    gnc_xml_node_set_prop (outer_value, "type", "frame");
 
-    xmlNodePtr inner_slot = kvp_slot ("inner", "integer", "7");
-    xmlAddChild (outer_value, inner_slot);
+    GncXmlNode* inner_slot = kvp_slot ("inner", "integer", "7");
+    outer_value->children = inner_slot;
 
     KvpFrame* frame = dom_tree_to_kvp_frame (frame_node);
     do_test (frame != nullptr, "dom_tree_to_kvp_frame: nested frame parses");
@@ -655,7 +651,7 @@ test_kvp_frame_nested (void)
         do_test (nested != nullptr, "dom_tree_to_kvp_frame: nested value is reachable by path");
         delete frame;
     }
-    xmlFreeNode (frame_node);
+    gnc_xml_node_free (frame_node);
 }
 
 /***********************************************************************/
@@ -665,7 +661,7 @@ test_kvp_frame_nested (void)
 static void
 test_comment_is_invisible (void)
 {
-    xmlNodePtr tree = parse_one_element ("test",
+    GncXmlNode* tree = parse_one_element ("test",
         "<test>before<!-- a comment in the middle -->after</test>");
     do_test (tree != nullptr, "comment: well-formed document with a comment parses");
     if (tree)
@@ -674,14 +670,14 @@ test_comment_is_invisible (void)
         do_test_args (text.has_value () && *text == "beforeafter",
                       "comment content is invisible to the reader", __FILE__, __LINE__,
                       "got [%s]", text ? text->c_str () : "(null)");
-        xmlFreeNode (tree);
+        gnc_xml_node_free (tree);
     }
 }
 
 static void
 test_cdata_becomes_plain_text (void)
 {
-    xmlNodePtr tree = parse_one_element ("test",
+    GncXmlNode* tree = parse_one_element ("test",
         "<test><![CDATA[<not-a-tag> & raw text]]></test>");
     do_test (tree != nullptr, "CDATA: well-formed document parses");
     if (tree)
@@ -690,38 +686,38 @@ test_cdata_becomes_plain_text (void)
         do_test_args (text.has_value () && *text == "<not-a-tag> & raw text",
                       "CDATA content comes through verbatim as plain text", __FILE__, __LINE__,
                       "got [%s]", text ? text->c_str () : "(null)");
-        xmlFreeNode (tree);
+        gnc_xml_node_free (tree);
     }
 }
 
 static void
 test_mixed_content_direct_siblings (void)
 {
-    xmlNodePtr tree = parse_one_element ("test", "<test>100<b/>200</test>");
+    GncXmlNode* tree = parse_one_element ("test", "<test>100<b/>200</test>");
     do_test (tree != nullptr, "mixed content: well-formed document parses");
     if (tree)
     {
-        xmlChar* text = xmlNodeListGetString (NULL, tree->xmlChildrenNode, TRUE);
-        do_test_args (g_strcmp0 ((char*)text, "100200") == 0,
+        char* text = gnc_xml_node_list_get_string (tree->children);
+        do_test_args (g_strcmp0 (text, "100200") == 0,
                       "mixed content: direct-sibling text around a nested element is captured",
-                      __FILE__, __LINE__, "got [%s]", (char*)text);
-        xmlFree (text);
-        xmlFreeNode (tree);
+                      __FILE__, __LINE__, "got [%s]", text);
+        g_free (text);
+        gnc_xml_node_free (tree);
     }
 }
 
 /***********************************************************************/
-/* 6. Well-formedness failures: caught by libxml2 before any xmlNode   */
+/* 6. Well-formedness failures: caught by libxml2 before any GncXmlNode */
 /*    is even built, unaffected by which tree type the reader uses.    */
 /***********************************************************************/
 
 static void
 expect_parse_failure (const char* label, const char* xml)
 {
-    xmlNodePtr tree = parse_one_element ("test", xml);
+    GncXmlNode* tree = parse_one_element ("test", xml);
     do_test_args (tree == nullptr, label, __FILE__, __LINE__, "expected rejection, got a tree");
     if (tree)
-        xmlFreeNode (tree);
+        gnc_xml_node_free (tree);
 }
 
 static void
@@ -741,10 +737,10 @@ test_well_formedness_failures (void)
            legal XML 1.0 character even when the bytes are otherwise
            valid UTF-8. */
         char raw[] = "<test>foo\x01""bar</test>";
-        xmlNodePtr tree = parse_one_element ("test", std::string (raw, sizeof (raw) - 1));
+        GncXmlNode* tree = parse_one_element ("test", std::string (raw, sizeof (raw) - 1));
         do_test (tree == nullptr, "illegal control byte in content is rejected");
         if (tree)
-            xmlFreeNode (tree);
+            gnc_xml_node_free (tree);
     }
 }
 
