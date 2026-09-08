@@ -62,6 +62,8 @@ namespace Gnucash {
         boost::optional <std::string> m_namespace;
         bool m_verbose = false;
 
+        boost::optional <std::string> m_check_cmd;
+
         boost::optional <std::string> m_report_cmd;
         boost::optional <std::string> m_report_name;
         boost::optional <std::string> m_export_type;
@@ -124,6 +126,19 @@ may be specified to describe some saved options.\n"
     m_opt_desc_display->add (report_options);
     m_opt_desc_all.add (report_options);
 
+    bpo::options_description check_options(_("Data Checking Options"));
+    check_options.add_options()
+    ("check,C", bpo::value (&m_check_cmd),
+     _("Check the given GnuCash datafile. The following checks are supported.\n\n"
+       "  reconciled: \tRe-check every reconciled balance recorded for the file: "
+       "for each, whether the account still holds the balance it held when the "
+       "reconciliation was completed. Reports the accounts and dates where it "
+       "no longer does, and by how much. Exits 2 if any no longer holds.\n\n"
+       "Records are kept in the file's .gcm state file and are local to this "
+       "machine, so a file that was reconciled elsewhere has none here. Add "
+       "--verbose to list the balances that do still hold as well.\n"));
+    m_opt_desc_display->add (check_options);
+    m_opt_desc_all.add (check_options);
 }
 
 int
@@ -215,6 +230,25 @@ Gnucash::GnucashCli::start ([[maybe_unused]] int argc, [[maybe_unused]] char **a
                       << *m_opt_desc_display.get();
             return 1;
         }
+    }
+
+    if (m_check_cmd)
+    {
+        if (*m_check_cmd != "reconciled")
+        {
+            std::cerr << bl::format (std::string{_("Unknown check command '{1}'")}) % *m_check_cmd << "\n\n"
+                      << *m_opt_desc_display.get() << std::endl;
+            return 1;
+        }
+
+        if (!m_file_to_load || m_file_to_load->empty())
+        {
+            std::cerr << _("Missing data file parameter") << "\n\n"
+                      << *m_opt_desc_display.get() << std::endl;
+            return 1;
+        }
+
+        return Gnucash::check_reconciled_balances (m_file_to_load, m_verbose);
     }
 
     std::cerr << _("Missing command or option") << "\n\n"

@@ -46,5 +46,6 @@ namespace Gnucash {
     int report_list (void);
     int report_show (const bo_str& file_to_load,
                      const bo_str& run_report);
+    int check_reconciled_balances (const bo_str& file_to_load, bool verbose);
 }
 #endif

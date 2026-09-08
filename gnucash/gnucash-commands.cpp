@@ -37,6 +37,10 @@
 #include <gnc-prefs.h>
 #include <gnc-prefs-utils.h>
 #include <gnc-session.h>
+#include <gnc-state.h>
+#include <gnc-reconciled-balance.h>
+#include <gnc-ui-util.h>
+#include <Account.h>
 #include <qoflog.h>
 
 #include <boost/locale.hpp>
@@ -436,4 +440,203 @@ Gnucash::report_list (void)
 {
     scm_boot_guile (0, nullptr, scm_report_list, NULL);
     return 0;
+}
+
+/* ================================================================ *
+ * Checking reconciled balances                                     *
+ * ================================================================ */
+
+/* One row of output. Held rather than printed as we go so that the
+ * records for an account can be examined together before any of them is
+ * described -- the pattern across them says more than any one does. */
+struct RecnCheckRow
+{
+    std::string date;
+    std::string recorded;
+    std::string actual;
+    std::string delta;
+    std::string notes;
+    bool broken;
+};
+
+/* Amounts are printed the way the register shows them, so that a credit
+ * card's -1,204.55 does not read as 1,204.55 here and the other way
+ * round in the GUI. */
+static std::string
+recn_print (const Account *acc, gnc_numeric amount)
+{
+    auto pinfo = gnc_account_print_info (acc, TRUE);
+
+    if (gnc_reverse_balance (acc))
+        amount = gnc_numeric_neg (amount);
+
+    return xaccPrintAmount (amount, pinfo);
+}
+
+static std::string
+recn_print_date (time64 date)
+{
+    char buf[MAX_DATE_LENGTH + 1];
+
+    qof_print_date_buff (buf, MAX_DATE_LENGTH, date);
+    return buf;
+}
+
+/* Every broken record out by the same amount is the signature of one
+ * transaction entered after the fact with an earlier date -- a cheque
+ * cashed late, most often -- rather than of damage in several places.
+ * Saying which of the two it looks like is the whole value of reading
+ * an account's records together. */
+static bool
+recn_shares_one_delta (const std::vector<gnc_numeric>& deltas)
+{
+    if (deltas.size() < 2)
+        return false;
+
+    for (const auto& d : deltas)
+        if (!gnc_numeric_equal (d, deltas.front()))
+            return false;
+
+    return true;
+}
+
+static void
+recn_report_account (const Account *acc, const std::vector<RecnCheckRow>& rows,
+                     const std::vector<gnc_numeric>& broken_deltas,
+                     bool verbose)
+{
+    auto name = gnc_account_get_full_name (const_cast<Account*>(acc));
+
+    std::cout << name << "\n";
+    g_free (name);
+
+    for (const auto& row : rows)
+    {
+        if (!row.broken && !verbose)
+            continue;
+
+        std::cout << "  " << (row.broken ? "BROKEN" : "ok    ")
+                  << "  " << std::setw (12) << row.date
+                  << "  recorded " << std::setw (14) << std::right << row.recorded
+                  << "  now " << std::setw (14) << std::right << row.actual;
+
+        if (row.broken)
+            std::cout << "  out by " << std::setw (14) << std::right << row.delta;
+
+        if (!row.notes.empty())
+            std::cout << "  (" << row.notes << ")";
+
+        std::cout << std::left << "\n";
+    }
+
+    if (recn_shares_one_delta (broken_deltas))
+        std::cout << bl::format
+            (bl::translate ("  All {1} out by the same {2}: this is what one "
+                            "transaction entered late with an earlier date "
+                            "looks like."))
+            % broken_deltas.size ()
+            % recn_print (acc, broken_deltas.front ())
+                  << "\n";
+    else if (broken_deltas.size () > 1)
+        std::cout << bl::translate
+            ("  Out by differing amounts: more than one thing has changed.")
+                  << "\n";
+
+    std::cout << std::endl;
+}
+
+int
+Gnucash::check_reconciled_balances (const bo_str& file_to_load, bool verbose)
+{
+    gnc_prefs_init ();
+    qof_event_suspend ();
+
+    auto session = gnc_get_current_session ();
+    if (!session)
+        return 1;
+
+    /* Read-only: checking must never take the lock, so that it can be
+     * run against a book that is open in GnuCash at the time. */
+    qof_session_begin (session, file_to_load->c_str (), SESSION_READ_ONLY);
+    if (qof_session_get_error (session) != ERR_BACKEND_NO_ERR)
+        return cleanup_and_exit_with_failure (session);
+
+    qof_session_load (session, NULL);
+    if (qof_session_get_error (session) != ERR_BACKEND_NO_ERR)
+        return cleanup_and_exit_with_failure (session);
+
+    /* The records live in the state file, which the GUI loads on opening
+     * a book. Nothing has done that for us here. */
+    gnc_state_load (session);
+
+    auto book = qof_session_get_book (session);
+    auto all = gnc_reconciled_balance_get_all (book);
+    guint total = 0, broken = 0;
+
+    /* Records arrive sorted by date across the whole book; group them by
+     * account so that each account's pattern can be read at once. */
+    std::map<const Account*, std::vector<RecnCheckRow>> by_account;
+    std::map<const Account*, std::vector<gnc_numeric>> deltas;
+    std::vector<const Account*> order;
+
+    for (auto n = all; n; n = n->next)
+    {
+        auto rb = static_cast<GncReconciledBalance*> (n->data);
+        auto acc = gnc_reconciled_balance_get_account (rb);
+        auto is_broken = gnc_reconciled_balance_is_broken (rb);
+
+        if (by_account.find (acc) == by_account.end ())
+            order.push_back (acc);
+
+        by_account[acc].push_back
+            ({ recn_print_date (gnc_reconciled_balance_get_date (rb)),
+               recn_print (acc, gnc_reconciled_balance_get_amount (rb)),
+               recn_print (acc, gnc_reconciled_balance_get_actual (rb)),
+               recn_print (acc, gnc_reconciled_balance_get_delta (rb)),
+               gnc_reconciled_balance_get_notes (rb),
+               static_cast<bool> (is_broken) });
+
+        if (is_broken)
+        {
+            deltas[acc].push_back (gnc_reconciled_balance_get_delta (rb));
+            ++broken;
+        }
+
+        ++total;
+    }
+
+    g_list_free (all);
+
+    std::cout << std::left;
+
+    for (auto acc : order)
+    {
+        /* With nothing broken there is nothing to say about an account
+         * unless the user asked to see the lot. */
+        if (deltas[acc].empty () && !verbose)
+            continue;
+
+        recn_report_account (acc, by_account[acc], deltas[acc], verbose);
+    }
+
+    if (total == 0)
+        /* Not the same as a clean book, and worth distinguishing: no
+         * record was ever written for this file on this machine. */
+        std::cout << bl::translate
+            ("No reconciled balances are recorded for this file.") << std::endl;
+    else if (broken == 0)
+        std::cout << bl::format
+            (bl::translate ("{1} reconciled balance still holds.",
+                            "All {1} reconciled balances still hold.", total))
+            % total << std::endl;
+    else
+        std::cout << bl::format
+            (bl::translate ("{1} of {2} reconciled balances no longer holds.",
+                            "{1} of {2} reconciled balances no longer hold.",
+                            broken)) % broken % total << std::endl;
+
+    qof_session_destroy (session);
+    qof_event_resume ();
+
+    return broken ? 2 : 0;
 }
