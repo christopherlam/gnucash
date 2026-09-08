@@ -56,6 +56,7 @@
 #include "gnc-gtk-utils.h"
 //#include "gnc-main-window.h"
 #include "gnc-plugin-page-register.h"
+#include "gnc-reconciled-balance.h"
 #include "gnc-prefs.h"
 #include "gnc-ui.h"
 #include "gnc-ui-balances.h"
@@ -2399,6 +2400,60 @@ find_payment_account(Account *account)
     return nullptr;
 }
 
+/* Record what this reconciliation established, so that it can be
+ * checked again later. GnuCash otherwise keeps only the date and the
+ * per-split flags: nothing afterwards can answer "is the statement I
+ * agreed to last January still the one my book shows?".
+ *
+ * What gets sealed is the account's own balance as of the statement
+ * date -- every split posted on or before it, cleared or not. That is
+ * the only figure that can be recomputed later and compared, and it is
+ * exactly the figure a back-dated entry, a deletion or a duplicate
+ * import disturbs.
+ *
+ * Records at later dates are left alone. Reconciling moves no money --
+ * it sets flags on splits -- so it cannot by itself falsify a record
+ * dated after this statement. If the user entered a missing transaction
+ * during the session, the later records break, and they should: that is
+ * a real change to a period they cover, and re-sealing them here would
+ * destroy the evidence rather than report it.
+ *
+ * Nothing here reports on the records; they are written and left alone.
+ * Checking them is a separate, deliberate act -- see
+ * `gnucash-cli --check reconciled`. */
+static void
+record_reconciled_balance (Account *account, time64 date, gnc_numeric ending)
+{
+    /* A reconciliation that includes child accounts agrees a balance for
+     * the whole subtree, which is not something a record about one
+     * account can express. Better to record nothing than something
+     * false. */
+    if (xaccAccountGetReconcileChildrenStatus (account))
+        return;
+
+    auto datebuf = qof_print_date (date);
+    auto pinfo = gnc_account_print_info (account, TRUE);
+    auto shown = gnc_reverse_balance (account) ? gnc_numeric_neg (ending) : ending;
+    auto notes = g_strdup_printf (_("Reconciled to statement of %s, ending %s"),
+                                  datebuf, xaccPrintAmount (shown, pinfo));
+
+    /* Seal what the book itself says about that date, not the statement
+     * figure: the two differ by anything not yet cleared, and only the
+     * book's own number can be recomputed later to check it. The
+     * statement figure goes in the notes, where it is worth having.
+     *
+     * Recording replaces any record already held for this account and
+     * date, so re-reconciling a statement supersedes whatever the last
+     * attempt left behind rather than accumulating a permanently broken
+     * row the user has no obvious way to explain. */
+    gnc_reconciled_balance_record (account, date,
+                                   gnc_reconciled_balance_compute (account, date),
+                                   notes);
+
+    g_free (notes);
+    g_free (datebuf);
+}
+
 static void
 acct_traverse_descendants (Account *acct, std::function<void(Account*)> fn)
 {
@@ -2449,6 +2504,8 @@ recnFinishCB (GSimpleAction *simple,
 
     xaccAccountClearReconcilePostpone (account);
     xaccAccountSetReconcileLastDate (account, date);
+
+    record_reconciled_balance (account, date, recnData->new_ending);
 
     if (auto_payment &&
             (xaccAccountGetType (account) == ACCT_TYPE_CREDIT) &&

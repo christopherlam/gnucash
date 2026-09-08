@@ -19,6 +19,7 @@ set (app_utils_HEADERS
   gnc-quotes.hpp
   gnc-state.h
   gnc-ui-util.h
+  gnc-reconciled-balance.h
   gnc-ui-balances.h
 )
 
@@ -34,6 +35,7 @@ set (app_utils_SOURCES
   gnc-quotes.cpp
   gnc-state.c
   gnc-ui-util.cpp
+  gnc-reconciled-balance.cpp
   gnc-ui-balances.cpp
   )
 

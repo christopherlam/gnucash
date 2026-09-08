@@ -75,6 +75,28 @@ gnc_add_test(test-autoclear "${test_autoclear_SOURCES}"
     test_autoclear_LIBS
 )
 
+set(test_gnc_reconciled_balance_SOURCES
+  gtest-gnc-reconciled-balance.cpp
+)
+
+set(test_gnc_reconciled_balance_INCLUDE_DIRS
+  ${CMAKE_BINARY_DIR}/common
+  ${CMAKE_SOURCE_DIR}/libgnucash/engine
+  ${CMAKE_SOURCE_DIR}/libgnucash/app-utils
+)
+
+set(test_gnc_reconciled_balance_LIBS
+  gnc-engine
+  gnc-app-utils
+  gtest
+)
+
+gnc_add_test(test-gnc-reconciled-balance
+    "${test_gnc_reconciled_balance_SOURCES}"
+    test_gnc_reconciled_balance_INCLUDE_DIRS
+    test_gnc_reconciled_balance_LIBS
+)
+
 set(GUILE_DEPENDS
   scm-test-engine
   scm-app-utils
@@ -93,4 +115,5 @@ set_dist_list(test_app_utils_DIST
   ${test_app_utils_scheme_SOURCES}
   ${test_app_utils_SOURCES}
   ${test_autoclear_SOURCES}
+  ${test_gnc_reconciled_balance_SOURCES}
 )
