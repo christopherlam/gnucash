@@ -525,9 +525,6 @@ Please deselect the accounts with negative balances."))
                  (list-of-rows #f)
                  (row-totals #f))
 
-            ;; apply default settings from preferences
-            (gnc:html-chart-apply-preferences-report! chart)
-
             ;; Set chart title, subtitle etc.
             (gnc:html-chart-set-type!
              chart (if (eq? chart-type 'barchart) 'bar 'line))
@@ -540,21 +537,11 @@ Please deselect the accounts with negative balances."))
             (gnc:html-chart-set-width! chart width)
             (gnc:html-chart-set-height! chart height)
 
-            (gnc:html-chart-set-tooltip-indexed?! chart tooltip-indexed)
+            (gnc:html-chart-set-tooltip-mode! chart (if tooltip-indexed 'index 'point))
             (gnc:html-chart-set-tooltip-non-zero-only! chart (get-option gnc:pagename-display optname-tooltip-non-zero-only))
 
-            ;; tailor applied GC's preferences toward this particular chart
-            (let ((isAverage  (string=? (gnc-prefs-get-string "general.report" "chart-tooltip-position") "average"))
-                  (pointSize  (gnc-prefs-get-int "general.report" "chart-point-size"))
-                  (pointSizeH (gnc-prefs-get-int "general.report" "chart-point-size-hover"))
-                  (isLineChart (if (eq? chart-type 'linechart) #t #f))
-                 )(
-                    if (or (not isLineChart) (and tooltip-indexed isAverage isLineChart))
-                         (gnc:html-chart-set! chart '(options tooltips caretPadding) 0)
-                         (if tooltip-indexed
-                           (gnc:html-chart-set! chart '(options tooltips caretPadding) (+ pointSize 2))
-                           (gnc:html-chart-set! chart '(options tooltips caretPadding) (+ pointSizeH 2))
-             )))
+            (gnc:html-chart-set-tooltip-caretpadding-from-prefs!
+             chart (eq? chart-type 'linechart) tooltip-indexed)
 
             (gnc:html-chart-set-data-labels! chart date-string-list)
             (gnc:html-chart-set-y-axis-label!

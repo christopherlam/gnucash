@@ -312,28 +312,16 @@
             (date-string-list (map qof-print-date dates-list)))
 
        (gnc:report-percent-done 90)
-       ;; apply default settings from preferences
-       (gnc:html-chart-apply-preferences-report! chart)
 
        (gnc:html-chart-set-type! chart (if linechart? 'line 'bar))
        (gnc:html-chart-set-width! chart width)
        (gnc:html-chart-set-height! chart height)
        (gnc:html-chart-set-title!
         chart (list report-title (gnc-date-interval-format from-date-t64 to-date-t64)))
-       (gnc:html-chart-set-tooltip-indexed?! chart tooltip-indexed)
+       (gnc:html-chart-set-tooltip-mode! chart (if tooltip-indexed 'index 'point))
        (gnc:html-chart-set-tooltip-non-zero-only! chart (get-option gnc:pagename-display optname-tooltip-non-zero-only))
 
-       ;; tailor applied GC's preferences toward this particular chart
-       (let ((isAverage  (string=? (gnc-prefs-get-string "general.report" "chart-tooltip-position") "average"))
-             (pointSize  (gnc-prefs-get-int "general.report" "chart-point-size"))
-             (pointSizeH (gnc-prefs-get-int "general.report" "chart-point-size-hover"))
-            )(
-               if (or (not linechart?) (and tooltip-indexed isAverage linechart?))
-                    (gnc:html-chart-set! chart '(options tooltips caretPadding) 0)
-                    (if tooltip-indexed
-                      (gnc:html-chart-set! chart '(options tooltips caretPadding) (+ pointSize 2))
-                      (gnc:html-chart-set! chart '(options tooltips caretPadding) (+ pointSizeH 2))
-        )))
+       (gnc:html-chart-set-tooltip-caretpadding-from-prefs! chart linechart? tooltip-indexed)
 
        (gnc:html-chart-set-y-axis-label!
         chart (gnc-commodity-get-mnemonic report-currency))

@@ -537,33 +537,19 @@ xaccTransDump (const Transaction *trans, const char *tag)
 }
 #endif
 
+static int
+split_sign_cmp (gconstpointer a, gconstpointer b)
+{
+    bool a_neg = gnc_numeric_negative_p (xaccSplitGetValue (GNC_SPLIT (a)));
+    bool b_neg = gnc_numeric_negative_p (xaccSplitGetValue (GNC_SPLIT (b)));
+    return a_neg == b_neg ? 0 : a_neg ? 1 : -1;
+}
+
 void
 xaccTransSortSplits (Transaction *trans)
 {
-    GList *node, *new_list = nullptr;
-    Split *split;
-
-    /* first debits */
-    for (node = trans->splits; node; node = node->next)
-    {
-        split = GNC_SPLIT(node->data);
-        if (gnc_numeric_negative_p (xaccSplitGetValue(split)))
-            continue;
-        new_list = g_list_prepend (new_list, split);
-    }
-
-    /* then credits */
-    for (node = trans->splits; node; node = node->next)
-    {
-        split = GNC_SPLIT(node->data);
-        if (!gnc_numeric_negative_p (xaccSplitGetValue(split)))
-            continue;
-        new_list = g_list_prepend (new_list, split);
-    }
-
-    /* install newly sorted list */
-    g_list_free(trans->splits);
-    trans->splits = g_list_reverse (new_list);
+    g_return_if_fail (trans);
+    trans->splits = g_list_sort (trans->splits, split_sign_cmp);
 }
 
 

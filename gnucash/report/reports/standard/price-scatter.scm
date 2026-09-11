@@ -163,9 +163,6 @@
         (gnc:html-markup-h3 title)
         (gnc:html-markup-p text))))
 
-    ;; apply default settings from preferences
-    (gnc:html-chart-apply-preferences-report! chart)
-
     (gnc:html-chart-set-type! chart 'line)
 
     (gnc:html-chart-set-currency-iso!
@@ -190,7 +187,8 @@
     (gnc:html-chart-set-custom-x-axis-ticks?! chart #f)
 
     ;; tailor applied GC's preferences toward this particular chart
-    (gnc:html-chart-set! chart '(options tooltips caretPadding) (+ (gnc-prefs-get-int "general.report" "chart-point-size") 2))
+    (gnc:html-chart-set-tooltip-caretpadding!
+     chart (+ (gnc-prefs-get-int "general.report" "chart-point-size") 2))
 
     (cond
      ((gnc-commodity-equiv report-currency price-commodity)
