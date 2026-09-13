@@ -28,6 +28,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <deque>
+#include <memory>
+#include <unordered_set>
 #include "gnc-date.h"
 #include "gnc-datetime.hpp"
 #include "gnc-numeric.h"
@@ -2324,29 +2327,43 @@ gnc_pricedb_lookup_nearest_before_t64 (GNCPriceDB *db,
 }
 
 
-static PriceList *
+/* RAII holder for the GList of GNCPrice* returned by the
+ * gnc_pricedb_lookup_*_any_currency() family: the list and the
+ * references it holds on its prices are released when it goes out of
+ * scope, whichever way the scope is left. */
+struct PriceListDeleter
+{
+    void operator() (PriceList *prices) const noexcept
+    { gnc_price_list_destroy (prices); }
+};
+using PriceListPtr = std::unique_ptr<PriceList, PriceListDeleter>;
+
+static PriceListPtr
 lookup_any_currency (GNCPriceDB *db, const gnc_commodity *commodity,
                      time64 t, gboolean before_date)
 {
     if (t == INT64_MAX)
-        return gnc_pricedb_lookup_latest_any_currency (db, commodity);
+        return PriceListPtr {gnc_pricedb_lookup_latest_any_currency (db, commodity)};
     if (before_date)
-        return gnc_pricedb_lookup_nearest_before_any_currency_t64 (db, commodity, t);
-    return gnc_pricedb_lookup_nearest_in_time_any_currency_t64 (db, commodity, t);
+        return PriceListPtr {gnc_pricedb_lookup_nearest_before_any_currency_t64 (db, commodity, t)};
+    return PriceListPtr {gnc_pricedb_lookup_nearest_in_time_any_currency_t64 (db, commodity, t)};
 }
 
 /* Maximum number of pivot currencies to cross when no direct or
  * single-pivot price is available. Each extra hop compounds the
  * date/rate uncertainty of the prices it's built from, so this is
  * kept small rather than searching the whole price graph. */
-#define MAX_INDIRECT_HOPS 5
+static constexpr unsigned max_indirect_hops = 5;
 
-typedef struct
+/* A commodity reached by the search below, along with the factor that
+ * converts an amount denominated in the commodity the search started
+ * from into this one. */
+struct PathNode
 {
     const gnc_commodity *commodity;
-    gnc_numeric factor; /* multiply an amount in `from` by this to get `commodity` */
-    guint depth;
-} PathNode;
+    gnc_numeric factor;
+    unsigned depth;
+};
 
 /* Breadth-first search over the "has a quoted price against" graph of
  * commodities, starting at `from` and stopping at the first path found
@@ -2359,48 +2376,35 @@ static gnc_numeric
 indirect_price_conversion (GNCPriceDB *db, const gnc_commodity *from,
                            const gnc_commodity *to, time64 t, gboolean before_date)
 {
-    gnc_numeric zero = gnc_numeric_zero();
-    GQueue queue = G_QUEUE_INIT;
-    gnc_numeric result = zero;
-    gboolean found = FALSE;
-
     if (!from || !to)
-        return zero;
+        return gnc_numeric_zero ();
 
-    GHashTable *visited = g_hash_table_new (g_direct_hash, g_direct_equal);
-    g_hash_table_add (visited, (gpointer) from);
+    std::unordered_set<const gnc_commodity*> visited {from};
+    std::deque<PathNode> queue {{from, gnc_numeric_create (1, 1), 0}};
 
-    PathNode *start = g_new (PathNode, 1);
-    start->commodity = from;
-    start->factor = gnc_numeric_create (1, 1);
-    start->depth = 0;
-    g_queue_push_tail (&queue, start);
-
-    while (!found && !g_queue_is_empty (&queue))
+    while (!queue.empty())
     {
-        PathNode *node = static_cast<PathNode*>(g_queue_pop_head (&queue));
+        auto node = queue.front();
+        queue.pop_front();
 
-        if (node->depth >= MAX_INDIRECT_HOPS)
-        {
-            g_free (node);
+        if (node.depth >= max_indirect_hops)
             continue;
-        }
 
-        PriceList *prices = lookup_any_currency (db, node->commodity, t, before_date);
-        for (GList *n = prices; n && !found; n = g_list_next (n))
+        auto prices = lookup_any_currency (db, node.commodity, t, before_date);
+        for (auto n = prices.get(); n; n = g_list_next (n))
         {
-            GNCPrice *price = GNC_PRICE (n->data);
-            gnc_commodity *price_com = gnc_price_get_commodity (price);
-            gnc_commodity *price_cur = gnc_price_get_currency (price);
-            gnc_commodity *neighbor;
-            gnc_numeric step, factor;
+            auto price = GNC_PRICE (n->data);
+            auto price_com = gnc_price_get_commodity (price);
+            auto price_cur = gnc_price_get_currency (price);
+            const gnc_commodity *neighbor;
+            gnc_numeric step;
 
-            if (price_com == node->commodity)
+            if (price_com == node.commodity)
             {
                 neighbor = price_cur;
                 step = gnc_price_get_value (price);
             }
-            else if (price_cur == node->commodity)
+            else if (price_cur == node.commodity)
             {
                 neighbor = price_com;
                 step = gnc_numeric_invert (gnc_price_get_value (price));
@@ -2408,34 +2412,18 @@ indirect_price_conversion (GNCPriceDB *db, const gnc_commodity *from,
             else
                 continue;
 
-            factor = gnc_numeric_mul (node->factor, step, GNC_DENOM_AUTO,
-                                      GNC_HOW_DENOM_REDUCE | GNC_HOW_RND_ROUND);
+            auto factor = gnc_numeric_mul (node.factor, step, GNC_DENOM_AUTO,
+                                           GNC_HOW_DENOM_REDUCE | GNC_HOW_RND_ROUND);
 
             if (neighbor == to)
-            {
-                result = factor;
-                found = TRUE;
-                continue;
-            }
+                return factor;
 
-            if (!g_hash_table_contains (visited, neighbor))
-            {
-                PathNode *next = g_new (PathNode, 1);
-                g_hash_table_add (visited, neighbor);
-                next->commodity = neighbor;
-                next->factor = factor;
-                next->depth = node->depth + 1;
-                g_queue_push_tail (&queue, next);
-            }
+            if (visited.insert (neighbor).second)
+                queue.push_back ({neighbor, factor, node.depth + 1});
         }
-        gnc_price_list_destroy (prices);
-        g_free (node);
     }
 
-    while (!g_queue_is_empty (&queue))
-        g_free (g_queue_pop_head (&queue));
-    g_hash_table_destroy (visited);
-    return result;
+    return gnc_numeric_zero ();
 }
 
 
