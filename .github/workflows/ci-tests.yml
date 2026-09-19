@@ -25,7 +25,7 @@ jobs:
       - name: Configure GnuCash
         run: |
           cd build
-          cmake -G Ninja -DWITH_PYTHON=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE
+          cmake -G Ninja -DWITH_PYTHON=ON -DWERROR=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE
       - name: Build and Test GnuCash
         run: |
           cd build
@@ -62,7 +62,7 @@ jobs:
       - name: Configure GnuCash
         run: |
           cd build
-          cmake -G Ninja -DWITH_PYTHON=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=Asan
+          cmake -G Ninja -DWITH_PYTHON=ON -DWERROR=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=Asan
       - name: Build and Test GnuCash
         run: |
           cd build

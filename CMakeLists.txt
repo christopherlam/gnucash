@@ -72,6 +72,7 @@ option (COVERAGE "Instrument a Debug or Asan build for coverage reporting" OFF)
 option (GUILE_COVERAGE "Compute testing coverage of Scheme code. WARNING: 15X slowdown!" OFF)
 option (LEAKS "Report leaks for tests in a non-Apple Asan build." OFF)
 option (ODR "Report One Definition Rule violations in tests in a non-Apple Asan build." OFF)
+option (WERROR "Treat compiler warnings as errors. Recommended for development and CI, not for distribution builds." OFF)
 # ############################################################
 
 # These are also settable from the command line in a similar way.
@@ -600,7 +601,7 @@ add_definitions(-D_GNU_SOURCE)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
@@ -617,14 +618,21 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 else()
   message(FATAL_ERROR "Only clang and gcc are supported compilers.")
 endif()
+# -Werror is for developers and CI, where a new warning should stop the
+# build. Distribution builds are made with compilers we have never tested
+# against, so defaulting it on turns every new upstream warning into a
+# build failure for packagers. Enable it with -DWERROR=ON.
+if (WERROR)
+  set(warnings_are_errors "-Werror")
+endif()
 if (UNIX)
-  set( CMAKE_C_FLAGS "-Werror -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
-  set( CMAKE_CXX_FLAGS "-Werror -Wall -Wmissing-declarations ${character_conversions} ${volatile_warning} ${CMAKE_CXX_FLAGS}")
+  set( CMAKE_C_FLAGS "${warnings_are_errors} -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
+  set( CMAKE_CXX_FLAGS "${warnings_are_errors} -Wall -Wmissing-declarations ${character_conversions} ${volatile_warning} ${CMAKE_CXX_FLAGS}")
   set( CMAKE_C_FLAGS_RELEASE "-O3 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 ${CMAKE_C_FLAGS}")
 endif()
 if (MINGW)
-  set( CMAKE_C_FLAGS "-Werror -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
-  set( CMAKE_CXX_FLAGS "-Werror -Wall -Wmissing-declarations ${character_conversions} ${volatile_warning} -DWINVER=0x0A00 ${CMAKE_CXX_FLAGS}") # Workaround for bug in gtest on mingw, see https://github.com/google/googletest/issues/893 and https://github.com/google/googletest/issues/920
+  set( CMAKE_C_FLAGS "${warnings_are_errors} -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
+  set( CMAKE_CXX_FLAGS "${warnings_are_errors} -Wall -Wmissing-declarations ${character_conversions} ${volatile_warning} -DWINVER=0x0A00 ${CMAKE_CXX_FLAGS}") # Workaround for bug in gtest on mingw, see https://github.com/google/googletest/issues/893 and https://github.com/google/googletest/issues/920
 endif()
 
 if (APPLE)

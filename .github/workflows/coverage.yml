@@ -26,7 +26,7 @@ jobs:
       - name: Configure GnuCash
         run: |
           cd build
-          cmake -G Ninja -DWITH_PYTHON=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=Debug -DCOVERAGE=ON
+          cmake -G Ninja -DWITH_PYTHON=ON -DWERROR=ON -DCMAKE_INSTALL_PREFIX=$ROOT_DIR/inst $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=Debug -DCOVERAGE=ON
       - name: Build and test GnuCash with coverage analysis
         run: |
           cd build
