@@ -38,8 +38,6 @@
 
 (export gnc:html-chart?)
 (export gnc:make-html-chart)
-(export gnc:html-chart-data)
-(export gnc:html-chart-set-data!)
 (export gnc:html-chart-width)
 (export gnc:html-chart-set-width!)
 (export gnc:html-chart-height)
@@ -536,7 +534,6 @@ document.getElementById(chartid).onclick = function(evt) {
     (push (format #f "<script id='script-~a'>\n" id))
     (push "(function () {\n")
     (push (format #f "var curriso = ~s;\n" (gnc:html-chart-currency-iso chart)))
-    (push (format #f "var currsym = ~s;\n" (gnc:html-chart-currency-symbol chart)))
     (push (format #f "var formsty = ~s;\n" (gnc:html-chart-format-style chart)))
     (push (format #f "var chartid = ~s;\n" id))
     (push (format #f "var jumpid = 'jump-~a';\n" id))
