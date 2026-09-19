@@ -86,8 +86,28 @@
 ;;             '(key3 key3-sub1 key3-sub1-sub1)
 ;; newval - the cdr of the innermost cons cell specified by the path
 ;;
+;; nested-alist-set!/nested-alist-get throw when path doesn't match
+;; the shape of lst:
+;; - 'invalid-path when a path segment can't be resolved -- lst (or
+;;   the sub-structure reached so far) isn't a list where a symbol
+;;   segment was expected, isn't a vector where a numeric segment was
+;;   expected, the symbol segment names a key that doesn't exist (get
+;;   only; nested-alist-set! creates it instead), or path is empty
+;;   from the start.
+;; - 'index-too-high when a numeric segment indexes past the end of
+;;   the vector found there.
+;; both throw with (reason full-path . irritants), where irritants
+;; are whatever extra values pin down the mismatch (the offending
+;; value, the vector length, etc).
+;;
 ;; see test-html-chart.scm for usage examples
 (define (nested-alist-set! lst path newval)
+  (define orig-path path)
+  (define (fail reason . irritants)
+    (apply throw 'invalid-path reason orig-path irritants))
+  (define (index-too-high idx vec)
+    (throw 'index-too-high orig-path idx (vector-length vec)))
+
   (define (path->nested-alist path newval)
     (let loop ((path (reverse path)) (result newval))
       (match path
@@ -99,34 +119,50 @@
         ((head . tail) (loop tail (list (cons head result)))))))
 
   (let loop ((nested-lst lst) (path path))
-    (define (out-of-bound? n) (and (number? n) (>= n (vector-length nested-lst))))
-    (define (existing? n) (and (number? n) (pair? (vector-ref nested-lst n))))
-    (if (null? nested-lst) (throw 'invalid-state))
     (match path
-      (() (throw 'invalid-state))
-      ((((? out-of-bound? idx)) . _) (throw 'index-too-high idx))
-      ((((? existing? idx)) . tail) (loop (vector-ref nested-lst idx) tail))
-      ((((? number? idx)) . tail) (vector-set! nested-lst idx
-                                               (path->nested-alist tail newval)))
+      (() (fail "cannot set: path is empty"))
+      ((((? number? idx)) . tail)
+       (cond
+        ((not (vector? nested-lst))
+         (fail "numeric path segment on a non-vector" nested-lst))
+        ((>= idx (vector-length nested-lst)) (index-too-high idx nested-lst))
+        ((pair? (vector-ref nested-lst idx)) (loop (vector-ref nested-lst idx) tail))
+        (else (vector-set! nested-lst idx (path->nested-alist tail newval)))))
       ((head . tail)
-       (let ((pair (assq head nested-lst)))
-         (cond
-          ((not pair) (set-cdr! (last-pair nested-lst) (path->nested-alist path newval)))
-          ((null? tail) (set-cdr! pair newval))
-          (else (loop (cdr pair) tail))))))))
+       (cond
+        ((not (list? nested-lst))
+         (fail "path continues past a non-list value" nested-lst))
+        ((null? nested-lst) (fail "cannot extend an empty list"))
+        (else
+         (let ((pair (assq head nested-lst)))
+           (cond
+            ((not pair) (set-cdr! (last-pair nested-lst) (path->nested-alist path newval)))
+            ((null? tail) (set-cdr! pair newval))
+            (else (loop (cdr pair) tail))))))))))
 
 (define (nested-alist-get lst path)
+  (define orig-path path)
+  (define (fail reason . irritants)
+    (apply throw 'invalid-path reason orig-path irritants))
+  (define (index-too-high idx vec)
+    (throw 'index-too-high orig-path idx (vector-length vec)))
+
   (let loop ((nested-lst lst) (path path))
-    (define (out-of-bound? n) (and (number? n) (>= n (vector-length nested-lst))))
     (match path
       (() nested-lst)
-      ((((? out-of-bound? idx)) . _) (throw 'index-too-high idx))
-      ((((? number? idx)) . tail) (loop (vector-ref nested-lst idx) tail))
+      ((((? number? idx)) . tail)
+       (cond
+        ((not (vector? nested-lst))
+         (fail "numeric path segment on a non-vector" nested-lst))
+        ((>= idx (vector-length nested-lst)) (index-too-high idx nested-lst))
+        (else (loop (vector-ref nested-lst idx) tail))))
       ((head . tail)
-       (let ((pair (assq head nested-lst)))
-         (if pair
-             (loop (cdr pair) tail)
-             (throw 'invalid-path path)))))))
+       (if (not (list? nested-lst))
+           (fail "path continues past a non-list value" nested-lst)
+           (let ((pair (assq head nested-lst)))
+             (if pair
+                 (loop (cdr pair) tail)
+                 (fail "key not found" head))))))))
 
 ;; helper for setting data - guile-json expects vectors to be
 ;; transformed into JSON arrays; convert list to vector. if not list,

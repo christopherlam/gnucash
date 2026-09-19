@@ -81,7 +81,7 @@
 
     (test-error
      "1st level option fails - cannot traverse through existing path"
-     'wrong-type-arg
+     'invalid-path
      (gnc:html-chart-set! chart '(options plugins legend position invalid) 'de))
 
     (test-error "deep nested new path - nonexistent"
