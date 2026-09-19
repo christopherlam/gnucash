@@ -45,9 +45,6 @@ borrowed/goffice/go-charmap-sel.c
 borrowed/goffice/go-glib-extras.c
 borrowed/goffice/go-optionmenu.c
 borrowed/guile-json/json/builder.scm
-borrowed/guile-json/json/parser.scm
-borrowed/guile-json/json/syntax.scm
-borrowed/guile-json/json.scm
 borrowed/jenny/jenny.c
 borrowed/libc/libc-missing-noop.c
 borrowed/libc/setenv.c
