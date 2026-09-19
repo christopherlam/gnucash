@@ -7,12 +7,11 @@ if (POLICY CMP0094)
   cmake_policy(SET CMP0094 NEW)
 endif()
 # CMake 3.30+ Use Boost's builtin BoostConfig.cmake instead of
-# FindBoost, the latter of which is removed. Setting this policy to OLD
-# temporarily restores it. BoostConfig.cmake was introduced in Boost
-# 1.70.  A fair number of distros are still shipping Boost 1.69 in
-# "legacy" versions so make it OLD for the 5.x series and NEW for 6.x.
+# FindBoost, the latter of which is deprecated and removed in CMake 4.
+# BoostConfig.cmake was introduced in Boost 1.70; we require 1.90, so
+# every supported Boost provides it.
 if (POLICY CMP0167)
-  cmake_policy(SET CMP0167 OLD)
+  cmake_policy(SET CMP0167 NEW)
 endif()
 # CMake 3.31+ Use normalization rules on install DESTINATION
 # command. We shouldn't be impacted so allow the new behavior.
@@ -526,16 +525,13 @@ set (Boost_FIND_QUIETLY ON)
 if (NOT DEFINED ${BOOST_ROOT})
   set(BOOST_ROOT $ENV{BOOST_ROOT})
 endif()
-find_package(Boost 1.90.0  REQUIRED COMPONENTS atomic charconv chrono container date_time filesystem locale program_options regex thread)
+# REQUIRED makes find_package fail the configure step with its own
+# diagnostic if Boost or any component is missing, so there is nothing
+# useful to add afterwards.
+find_package(Boost 1.90.0 REQUIRED COMPONENTS atomic charconv chrono container date_time filesystem locale program_options regex thread)
 
-
-if (Boost_FOUND)
-  include_directories(${Boost_INCLUDE_DIRS})
-  set(HAVE_BOOST 1)
-endif()
-if (NOT HAVE_BOOST)
-message (SEND_ERROR "A suitable Boost is not installed, and is required. GnuCash requires that Boost be compatible and compiled with C++17. Please install it and ensure that the following libraries are built: date_time, filesystem, locale, regex, program_options and system.")
-endif()
+include_directories(${Boost_INCLUDE_DIRS})
+set(HAVE_BOOST 1)
 
 
 # Compiler flags
