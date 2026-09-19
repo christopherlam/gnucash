@@ -34,7 +34,7 @@ unset(SWIG_ARGS)
 gnc_add_swig_guile_command(swig-expressions-guile-c #target
         SWIG_EXPRESSIONS_GUILE_C swig-expressions-guile.c #outvar, output
         ${CMAKE_CURRENT_SOURCE_DIR}/expressions.i #input
-        "${CMAKE_CURRENT_SOURCE_DIR};${CMAKE_SOURCE_DIR}/libgnucash/app-utils;${CMAKE_SOURCE_DIR}/libgnucash/expressions" #includes
+        "${CMAKE_CURRENT_SOURCE_DIR};${CMAKE_SOURCE_DIR}/libgnucash/app-utils" #includes
         )
 
 set(guile_HEADERS
@@ -93,7 +93,6 @@ add_library(gnc-expressions-guile SHARED
 
 target_include_directories(gnc-expressions-guile
         PUBLIC
-        ${CMAKE_SOURCE_DIR}/libgnucash/expressions
         ${GUILE_INCLUDE_DIRS})
 
 target_link_libraries(gnc-expressions-guile

@@ -209,16 +209,10 @@ gnc_hooks_init(void)
     gnc_hook_create(HOOK_NEW_BOOK, 0,
                     "Run after a new (empty) book is opened, before the"
                     " book-opened-hook. Hook args: ()");
-    gnc_hook_create(HOOK_REPORT, 0,
-                    "Run just before the reports are pushed into the menus."
-                    "  Hook args: ()");
     gnc_hook_create(HOOK_CURRENCY_CHANGED, 0,
                     "Functions to run when the user changes currency settings.  Hook args: ()");
     gnc_hook_create(HOOK_SAVE_OPTIONS, 0,
                     "Functions to run when saving options.  Hook args: ()");
-    gnc_hook_create(HOOK_ADD_EXTENSION, 0,
-                    "Functions to run when the extensions menu is created."
-                    "  Hook args: ()");
 
     gnc_hook_create(HOOK_BOOK_OPENED, 1,
                     "Run after book open.  Hook args: <gnc:Session*>.");
