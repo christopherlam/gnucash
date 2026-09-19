@@ -287,78 +287,30 @@ endif()
 find_package (SWIG 4.4.0 REQUIRED)
 include (${SWIG_USE_FILE})
 
-# Find Guile and determine which version we are using.
-# Look for guile versions in this order: 3.0 > 2.2 > 2.0
+# Find Guile. GnuCash 6.0 requires guile-3.0: guile-2.0 has been end of
+# life since 2017 and guile-2.2 since 2020, and every currently supported
+# distribution ships 3.0.
 
-# guile library and include dir
-pkg_check_modules (GUILE3 guile-3.0 QUIET)
-pkg_check_modules (GUILE22 guile-2.2 QUIET)
-pkg_check_modules (GUILE2 guile-2.0>=2.0.9 QUIET)
+pkg_check_modules (GUILE3 REQUIRED guile-3.0)
 
-if (GUILE3_FOUND) # found guile-3.0
-  add_definitions (-DHAVE_GUILE30)
-  set(HAVE_GUILE3 TRUE)
-  set(GUILE_EFFECTIVE_VERSION 3.0)
-  set(GUILE_INCLUDE_DIRS ${GUILE3_INCLUDE_DIRS})
-  set(GUILE_LDFLAGS ${GUILE3_LDFLAGS})
-  pkg_get_variable (GUILD_EXECUTABLE guile-3.0 guild)
-  pkg_get_variable (GUILE_EXECUTABLE guile-3.0 guile)
-  if (NOT GUILD_EXECUTABLE)
-    find_program (GUILD_EXECUTABLE NAMES guild3.0 guild)
-  endif()
-  if (NOT GUILD_EXECUTABLE)
-    message (SEND_ERROR "The guild executable was not found, but is required. Please set GUILD_EXECUTABLE.")
-  endif()
-  message(STATUS "Using guile-3.0.x")
-  if (NOT GUILE_EXECUTABLE)
-    find_program (GUILE_EXECUTABLE NAMES guile3.0 guile)
-  endif()
-
-elseif (GUILE22_FOUND) # found guile-2.2
-  add_definitions (-DHAVE_GUILE22)
-  set(HAVE_GUILE2 TRUE)
-  set(GUILE_EFFECTIVE_VERSION 2.2)
-  set(GUILE_INCLUDE_DIRS ${GUILE22_INCLUDE_DIRS})
-  set(GUILE_LDFLAGS ${GUILE22_LDFLAGS})
-  pkg_get_variable (GUILD_EXECUTABLE guile-2.2 guild)
-  pkg_get_variable (GUILE_EXECUTABLE guile-2.2 guile)
-  if (NOT GUILD_EXECUTABLE)
-    find_program (GUILD_EXECUTABLE NAMES guild2.2 guild)
-  endif()
-  if (NOT GUILD_EXECUTABLE)
-    message (SEND_ERROR "The guild executable was not found, but is required. Please set GUILD_EXECUTABLE.")
-  endif()
-  message(STATUS "Using guile-2.2.x")
-  if (NOT GUILE_EXECUTABLE)
-    find_program (GUILE_EXECUTABLE NAMES guile2.2 guile)
-  endif()
-
-elseif (GUILE2_FOUND) # found guile-2.0
-  add_definitions (-DHAVE_GUILE20)
-  set(HAVE_GUILE2 TRUE)
-  set(GUILE_EFFECTIVE_VERSION 2.0)
-  set(GUILE_INCLUDE_DIRS ${GUILE2_INCLUDE_DIRS})
-  set(GUILE_LDFLAGS ${GUILE2_LDFLAGS})
-  pkg_get_variable (GUILD_EXECUTABLE guile-2.0 guild)
-  pkg_get_variable (GUILE_EXECUTABLE guile-2.0 guile)
-  if (NOT GUILD_EXECUTABLE)
-    find_program (GUILD_EXECUTABLE NAMES guild2.0 guild)
-  endif()
-  if (NOT GUILD_EXECUTABLE)
-    message (SEND_ERROR "The guild executable was not found, but is required. Please set GUILD_EXECUTABLE.")
-  endif()
-  message(STATUS "Using guile-2.0.x")
-  if (NOT GUILE_EXECUTABLE)
-    find_program (GUILE_EXECUTABLE NAMES guile2.0 guile)
-  endif()
-
-else()
-  message (FATAL_ERROR "Neither guile 3.0, guile 2.2, nor guile 2.0 were found GnuCash can't run without one of them. Ensure that one is installed and can be found with pkg-config.")
+set(GUILE_EFFECTIVE_VERSION 3.0)
+set(GUILE_INCLUDE_DIRS ${GUILE3_INCLUDE_DIRS})
+set(GUILE_LDFLAGS ${GUILE3_LDFLAGS})
+pkg_get_variable (GUILD_EXECUTABLE guile-3.0 guild)
+pkg_get_variable (GUILE_EXECUTABLE guile-3.0 guile)
+if (NOT GUILD_EXECUTABLE)
+  find_program (GUILD_EXECUTABLE NAMES guild3.0 guild)
 endif()
-
+if (NOT GUILD_EXECUTABLE)
+  message (SEND_ERROR "The guild executable was not found, but is required. Please set GUILD_EXECUTABLE.")
+endif()
+if (NOT GUILE_EXECUTABLE)
+  find_program (GUILE_EXECUTABLE NAMES guile3.0 guile)
+endif()
 if (NOT GUILE_EXECUTABLE)
   message (SEND_ERROR "The guile executable was not found, but is required. Please set GUILE_EXECUTABLE.")
 endif()
+message(STATUS "Using guile-3.0.x")
 
 # Test that guile has SRFI-64. This is required for some unit tests.
 execute_process (COMMAND ${GUILE_EXECUTABLE} -c "(use-modules (srfi srfi-64))"
