@@ -576,7 +576,14 @@ endif()
 if (UNIX)
   set( CMAKE_C_FLAGS "${warnings_are_errors} -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
   set( CMAKE_CXX_FLAGS "${warnings_are_errors} -Wall -Wmissing-declarations ${character_conversions} ${volatile_warning} ${CMAKE_CXX_FLAGS}")
-  set( CMAKE_C_FLAGS_RELEASE "-O3 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 ${CMAKE_C_FLAGS}")
+  # _FORTIFY_SOURCE needs an optimising build, so it goes in the Release
+  # flags. Append rather than replace: CMake's defaults for these are
+  # "-O3 -DNDEBUG", and overwriting them dropped -DNDEBUG from Release C
+  # builds while leaving it in place for C++. Appending CMAKE_C_FLAGS
+  # here was redundant too, since CMake passes it alongside the
+  # per-configuration flags.
+  string(APPEND CMAKE_C_FLAGS_RELEASE " -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2")
+  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2")
 endif()
 if (MINGW)
   set( CMAKE_C_FLAGS "${warnings_are_errors} -Wall -Wmissing-prototypes -Wmissing-declarations ${CMAKE_C_FLAGS}")
