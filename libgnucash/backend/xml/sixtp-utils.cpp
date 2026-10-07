@@ -160,16 +160,7 @@ static bool parse_chars_into_num (std::string_view sv, T* num_ptr)
 gboolean
 string_to_double (std::string_view sv, double* result)
 {
-#if __cpp_lib_to_chars >= 201611L
     return parse_chars_into_num<double>(sv, result);
-#else
-    // because from_chars in cpp < 201611L cannot parse floats
-    g_return_val_if_fail (result, false);
-    std::string str{sv};
-    char* endptr = nullptr;
-    *result = std::strtod (str.c_str(), &endptr);
-    return (endptr != str.c_str());
-#endif
 }
 
 /*********/

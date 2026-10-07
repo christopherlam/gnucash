@@ -165,10 +165,7 @@ main (int argc, char** argv)
     fflush (stdout);
     test_string_converters ();
     test_bad_string ();
-#if __cpp_lib_to_chars >= 201611L
-    // because older strtod code is more liberal and parses "123z" as 123.0
     test_string_to_num<double> ("string_to_double", test_cases_double, string_to_double);
-#endif
     test_string_to_num<gint64> ("string_to_gint64", test_cases_gint64, string_to_gint64);
     test_string_to_num<guint16>("string_to_guint16",test_cases_guint16,string_to_guint16);
     test_string_to_num<guint>  ("string_to_guint",  test_cases_guint,  string_to_guint);
